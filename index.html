@@ -759,6 +759,26 @@
   .plan-job.collapsed .plan-job-body{display:none;}
   .plan-job-sum{font-size:11.5px;color:var(--text-dim);font-family:var(--mono);}
   .plan-shift-note{font-size:10.5px;color:var(--text-faint);margin-top:4px;line-height:1.6;}
+  /* แผนแนะนำ — เทียบลำดับปัจจุบันกับลำดับที่คำนวณแล้วว่าดีที่สุด */
+  .plan-suggest-cmp{display:flex;flex-wrap:wrap;gap:12px;}
+  .plan-suggest-card{
+    flex:1;min-width:230px;background:var(--surface-2);border:1px solid var(--border);
+    border-radius:10px;padding:12px 14px;
+  }
+  .plan-suggest-card.best{border-color:var(--accent);background:var(--accent-dim);}
+  .plan-suggest-card-t{font-size:11px;color:var(--text-faint);margin-bottom:6px;}
+  .plan-suggest-card-v{font-family:var(--mono);font-size:14px;font-weight:600;}
+  .plan-suggest-card-v.good{color:var(--good);}
+  .plan-suggest-card-v.bad{color:var(--bad);}
+  .plan-suggest-card-s{font-family:var(--mono);font-size:11px;color:var(--text-dim);margin-top:4px;line-height:1.6;}
+  .plan-suggest-verdict{font-size:12.5px;color:var(--text-dim);margin-top:12px;}
+  .plan-suggest-verdict.good{color:var(--good);}
+  .plan-suggest-cost{color:var(--warn);}
+  .plan-suggest-verdict b{font-family:var(--mono);}
+  .plan-suggest-table{min-width:720px;}
+  .plan-move-tag{font-family:var(--mono);font-size:10px;margin-left:6px;}
+  .plan-move-tag.up{color:var(--good);}
+  .plan-move-tag.down{color:var(--text-faint);}
   .plan-shift-note.bad{color:var(--bad);}
   /* ไทม์ไลน์ของ Item — อยู่ในใบเดียวกับตารางขั้นตอน จะได้อ่านคู่กันโดยไม่ต้องเลื่อนไปหาแผงรวม */
   .plan-job-tl{margin-top:18px;padding-top:14px;border-top:1px dashed var(--border);}
@@ -1808,7 +1828,7 @@ const planState = {
   computed: false,  // กดปุ่ม "คำนวณเวลาในการผลิต" ไปแล้วหรือยัง
   dirty: false,     // แก้รายการหลังคำนวณ — ผลลัพธ์ที่เห็นยังเป็นของรอบก่อน
   // เลือกดูเฉพาะส่วนที่สนใจ (ไม่ได้บันทึกไปกับแผน เป็นการตั้งค่าการมองของเครื่องนี้เท่านั้น)
-  show: {kpi:true, jobs:true, balance:true, timeline:true, lead:true, assume:true},
+  show: {kpi:true, jobs:true, balance:true, timeline:true, lead:true, assume:true, suggest:true},
   collapsedJobs: {}   // uid ของ Item ที่พับเก็บอยู่
 };
 
@@ -2889,6 +2909,142 @@ function computePlan(){
   };
 }
 
+// ---------- แผนแนะนำ: ควรขึ้นงาน Item ไหนก่อน ----------
+// จัดลำดับใหม่แล้วคำนวณทั้งแผนซ้ำเพื่อดูผลจริง ไม่ได้เดาจากสูตร เพราะคิวคนและการส่งต่อระหว่างหน่วย
+// ทำให้ผลของลำดับหนึ่งคาดเดาจากตัวเลขบนกระดาษไม่ได้ · ลองไม่ครบทุกแบบ (14 ใบ = 87 พันล้านลำดับ)
+// แต่ลองกฎจัดคิวที่ใช้กันจริงในโรงงานก่อน แล้วค่อยขยับใบที่ยังไม่ทันขึ้นมาทีละก้าว
+const PLAN_SUGGEST_BUDGET_MS = 300;
+
+/** ตัวชี้วัดของลำดับหนึ่ง — ทันกำหนดมาก่อน แล้วค่อยเสร็จเร็ว */
+function planOrderScore(plan){
+  let late = 0, lateHours = 0, slackHours = 0;
+  plan.jobs.forEach(j=>{
+    if(!j.due) return;
+    if(j.due.late){ late++; lateHours += j.due.hours; }
+    else slackHours += j.due.hours;
+  });
+  return {late, lateHours, slackHours, finish: plan.finishDt ? plan.finishDt.getTime() : Infinity};
+}
+/** a ดีกว่า b ไหม — ใบที่ทำไม่ทันน้อยกว่าชนะก่อนเสมอ ถัดมาคือเลยกำหนดรวมน้อยกว่า แล้วจึงเสร็จเร็วกว่า */
+function planScoreBetter(a, b){
+  if(!b) return true;
+  if(a.late !== b.late) return a.late < b.late;
+  if(Math.abs(a.lateHours - b.lateHours) > 1e-6) return a.lateHours < b.lateHours;
+  if(a.finish !== b.finish) return a.finish < b.finish;
+  return a.slackHours > b.slackHours + 1e-6;
+}
+/** คำนวณทั้งแผนด้วยลำดับที่กำหนด แล้วคืนสถานะเดิมเสมอ */
+function planEvaluateOrder(order){
+  const keep = planState.jobs;
+  try{
+    planState.jobs = order;
+    const plan = computePlan();
+    return {plan, score: planOrderScore(plan)};
+  } finally {
+    planState.jobs = keep;
+  }
+}
+/** หาลำดับที่ดีที่สุดเท่าที่ลองไหวในเวลาที่ให้ */
+function planBuildSuggestion(){
+  const jobs = planValidJobs();
+  const current = planEvaluateOrder(jobs.slice());
+  if(jobs.length < 2) return {jobs, current, best: null, sameAsCurrent: true, tuned: false};
+
+  // ชั่วโมงงานและกำหนดเสร็จของแต่ละใบไม่ขึ้นกับลำดับ ดึงจากผลรอบปัจจุบันมาใช้จัดกลุ่มได้เลย
+  const info = new Map(current.plan.jobs.map(j=> [j.job, {
+    work: (j.mainHours || 0) + (j.extraHours || 0),
+    due: j.dueDt ? j.dueDt.getTime() : Infinity
+  }]));
+  const at = new Map(jobs.map((j,i)=> [j, i]));
+  const work = j=> (info.get(j) || {}).work || 0;
+  const due = j=> { const d = (info.get(j) || {}).due; return d == null ? Infinity : d; };
+  const by = (...keys)=> jobs.slice().sort((a,b)=>{
+    for(const k of keys){
+      const d = k(a) - k(b);
+      if(d) return d;
+    }
+    return at.get(a) - at.get(b);
+  });
+  const candidates = [
+    {key:'edd',   label:'กำหนดเสร็จใกล้ที่สุดขึ้นก่อน',        order: by(due, work)},
+    {key:'eddL',  label:'กำหนดใกล้ก่อน · ใบใหญ่ขึ้นก่อน',      order: by(due, j=> -work(j))},
+    {key:'slack', label:'ใบที่เหลือเวลาน้อยที่สุดขึ้นก่อน',     order: by(j=> due(j) - work(j)*3600000, work)},
+    {key:'spt',   label:'ใบเล็กขึ้นก่อน (เคลียร์คิวให้ว่างเร็ว)', order: by(work, due)},
+    {key:'lpt',   label:'ใบใหญ่ขึ้นก่อน (กันงานยาวไปตกท้ายแผน)', order: by(j=> -work(j), due)}
+  ];
+
+  let best = {key:'current', label:'ลำดับปัจจุบัน', order: jobs.slice(), plan: current.plan, score: current.score};
+  candidates.forEach(c=>{
+    const res = planEvaluateOrder(c.order);
+    if(planScoreBetter(res.score, best.score)) best = {key: c.key, label: c.label, order: c.order, plan: res.plan, score: res.score};
+  });
+
+  // ขยับทีละใบ: เอาใบที่ยังไม่ทันกำหนด (และใบที่ปิดท้ายแผน) ไปแทรกตำแหน่งอื่น เก็บไว้เฉพาะที่ดีขึ้นจริง
+  const deadline = performance.now() + PLAN_SUGGEST_BUDGET_MS;
+  let tuned = false, moved = true, guard = 0;
+  while(moved && guard++ < 60 && performance.now() < deadline){
+    moved = false;
+    const problem = best.plan.jobs.filter(j=> j.due && j.due.late).map(j=> j.job);
+    const tail = best.plan.jobs.reduce((mx,j)=> (j.end_dt && (!mx || j.end_dt > mx.end_dt)) ? j : mx, null);
+    if(tail && problem.indexOf(tail.job) === -1) problem.push(tail.job);
+    for(const job of problem){
+      const from = best.order.indexOf(job);
+      if(from < 0) continue;
+      for(let to = 0; to < best.order.length && !moved; to++){
+        if(to === from || performance.now() > deadline) continue;
+        const trial = best.order.slice();
+        trial.splice(from, 1);
+        trial.splice(to, 0, job);
+        const res = planEvaluateOrder(trial);
+        if(planScoreBetter(res.score, best.score)){
+          best = {key: best.key, label: best.label, order: trial, plan: res.plan, score: res.score};
+          moved = true;
+          tuned = true;
+        }
+      }
+      if(moved) break;
+    }
+  }
+
+  const same = best.order.every((j,i)=> j === jobs[i]);
+  return {jobs, current, best, sameAsCurrent: same, tuned};
+}
+
+/** ลายเซ็นของทุกอย่างที่มีผลกับลำดับ — ใช้ตัดสินว่าผลที่คิดไว้ยังใช้ได้อยู่ไหม */
+function planSuggestSignature(){
+  return JSON.stringify([
+    planState.shiftStart, planState.shiftEnd, planBreaksText(), planState.startIso, planState.dueIso,
+    planState.scrapPct, planState.rateBasis, planState.flowMode, planState.wipHours,
+    planState.capacity, planState.workers,
+    planValidJobs().map(j=> [j.item, j.qty, j.startIso || '', j.dueIso || '', j.order || [], j.manualSteps || [], j.overrides || {}])
+  ]);
+}
+let planSuggestCache = null;
+let planSuggestTimer = null;
+/** ผลที่คิดไว้ล่าสุด — ถ้ายังไม่มีก็ตั้งคิวคิดหลังผู้ใช้หยุดพิมพ์ แล้ววาดใหม่ให้เอง
+ *  (คิดหนึ่งรอบ = คำนวณทั้งแผนหลายสิบครั้ง ถ้าคิดสดทุกครั้งที่วาด ตารางจะหน่วงตอนพิมพ์) */
+function planSuggestionCached(){
+  const sig = planSuggestSignature();
+  if(planSuggestCache && planSuggestCache.sig === sig) return planSuggestCache.result;
+  clearTimeout(planSuggestTimer);
+  planSuggestTimer = setTimeout(()=>{
+    planSuggestCache = {sig, result: planBuildSuggestion()};
+    renderPlanner();
+  }, 400);
+  return null;
+}
+/** ปุ่ม "ใช้ลำดับนี้" — สลับลำดับ Item ในแผนตามที่แนะนำ (แถวที่ยังไม่ได้กรอกรหัสต่อท้ายไว้เหมือนเดิม) */
+function planApplySuggestedOrder(){
+  // อ่านจากผลที่คิดไว้ตรงๆ ไม่เรียก planSuggestionCached เพราะไม่อยากให้การกดปุ่มไปตั้งคิวคิดรอบใหม่
+  const sug = (planSuggestCache && planSuggestCache.sig === planSuggestSignature()) ? planSuggestCache.result : null;
+  if(!sug || !sug.best) return;
+  const rest = planState.jobs.filter(j=> !j.item);
+  planState.jobs = sug.best.order.concat(rest);
+  planSuggestCache = null;
+  renderPlanRows();
+  renderPlanner();
+}
+
 const PLAN_RATE_SRC_LABEL = {
   rate_target_95: 'จากเป้า 95%',
   rate_target_100: 'จากเป้า 100%',
@@ -3535,6 +3691,7 @@ function renderPlanner(){
     {k:'timeline', label:'ไทม์ไลน์'},
     {k:'lead',     label:'สรุป Lead time'},
     {k:'assume',   label:'สมมติฐาน'},
+    {k:'suggest',  label:'แผนแนะนำ'},
   ];
   const anyHidden = viewChips.some(c=> !plan.show[c.k]);
   const viewBarHtml = `
@@ -4086,12 +4243,13 @@ function renderPlanner(){
         <li><b>ผู้รับผิดชอบ</b> — ปล่อยว่างไว้ระบบจะเลือกคนที่ว่างเร็วที่สุดในหน่วยนั้นให้เอง (ถ้ากรอกรายชื่อไว้จะขึ้นว่า “จัดให้: ชื่อ”) ${plan.overlap
             ? 'หรือเจาะจงเองก็ได้ — หน่วยที่กรอกรายชื่อไว้จะมีลิสต์ให้เลือกที่ช่อง “ผู้รับผิดชอบ” ของขั้นตอนนั้น เลือกแล้วงานจะถูกล็อกให้คนนั้น เลือก “พิมพ์ชื่อเอง / หลายคน…” เพื่อใส่ชื่อนอกรายชื่อหรือหลายชื่อคั่นด้วยจุลภาค (ชื่อที่ไม่อยู่ในรายชื่อของหน่วยนั้นถือเป็นคนเพิ่มมาอีกหนึ่งคิว) · <b>คนหนึ่งรับได้กี่งานพร้อมกัน</b> ตั้งได้ในตาราง “คนในไลน์” ใต้ตารางกำลังคน ค่าเริ่มต้นคือทีละ 1 งาน ใครคุมสองเครื่องพร้อมกันได้ใส่เป็น 2 เขาจะรับงานใหม่ได้ทั้งที่งานเก่ายังไม่จบ คิวของเขาต่อกันข้ามหน่วยงานและข้าม Item ในแผนเดียวกัน'
             : 'ชื่อที่กรอกไว้จะถูกบันทึกและส่งออกไปกับแผน แต่โหมด “ทำจบทีละขั้น” ไม่ได้คิดคิวของแต่ละคน — เปลี่ยนเป็นโหมดส่งต่อระหว่างทำถ้าต้องการให้คิวคนมีผลกับเวลา'}</li>
-        <li><b>ซ่อน/แสดงแต่ละส่วน</b> — แถบ “แสดง:” ด้านบนสุดเปิด-ปิดได้ทีละส่วน (สรุปตัวเลข / รายการ Item / กำลังคน / ไทม์ไลน์ / สรุป Lead time) · <b>ไทม์ไลน์รายขั้นตอนอยู่ในใบของแต่ละ Item</b> ใต้ตารางขั้นตอนของใบนั้น (ถ้าซ่อนรายการ Item ไว้ ไทม์ไลน์ทุกใบจะมารวมกันเป็นแผงเดียวแทน) ส่วน<b>ภาพรวมทั้งแผนอยู่ล่างสุด</b> จะเหลือดูแค่ส่วนเดียวก็ได้ · Item แต่ละใบพับเก็บแยกกันได้ด้วยปุ่ม “พับ” ที่หัวใบ · การตั้งค่านี้เป็นของเครื่องนี้เท่านั้น ไม่ถูกบันทึกไปกับแผนหรือลิงค์ที่แชร์</li>
+        <li><b>ซ่อน/แสดงแต่ละส่วน</b> — แถบ “แสดง:” ด้านบนสุดเปิด-ปิดได้ทีละส่วน (สรุปตัวเลข / รายการ Item / กำลังคน / ไทม์ไลน์ / สรุป Lead time / แผนแนะนำ) · <b>ไทม์ไลน์รายขั้นตอนอยู่ในใบของแต่ละ Item</b> ใต้ตารางขั้นตอนของใบนั้น (ถ้าซ่อนรายการ Item ไว้ ไทม์ไลน์ทุกใบจะมารวมกันเป็นแผงเดียวแทน) ส่วน<b>ภาพรวมทั้งแผนอยู่ล่างสุด</b> จะเหลือดูแค่ส่วนเดียวก็ได้ · Item แต่ละใบพับเก็บแยกกันได้ด้วยปุ่ม “พับ” ที่หัวใบ · การตั้งค่านี้เป็นของเครื่องนี้เท่านั้น ไม่ถูกบันทึกไปกับแผนหรือลิงค์ที่แชร์</li>
         <li><b>กำหนดเสร็จ</b> — ใส่กำหนดส่งได้สองระดับ: ทั้งใบสั่งผลิต (ช่องด้านบน) และรายไอเทม (ช่องในกล่องรายการ Item) ไอเทมที่ไม่ได้กรอกกำหนดของตัวเองจะใช้กำหนดของทั้งใบ · ถือว่าต้องเสร็จภายใน<b>เวลาเลิกงาน</b>ของวันนั้น ถ้ากำหนดตกวันอาทิตย์จะถอยไปเป็นเวลาเลิกงานของวันเสาร์ · ไทม์ไลน์จะขึ้น<b>เส้นประแนวตั้ง</b>ตรงกำหนดเสร็จ สีเขียวคือทั้ง Item จบก่อนเส้น สีแดงคือมีงานล้ำเลยเส้นไป และส่วนต่างวัดเป็นวันทำงานแบบเดียวกับแกนเวลา (ไม่นับกลางคืนกับวันอาทิตย์) · กำหนดเสร็จไม่มีผลกับการคำนวณเวลา เป็นเส้นเทียบอย่างเดียว แก้แล้วเห็นผลทันทีโดยไม่ต้องกดคำนวณใหม่</li>
         <li><b>วันเริ่มรายไอเทม</b> — ช่อง <b>วันเริ่ม</b> ในกล่องรายการ Item ใช้กับ Item ที่<b>ไม่ต้องการให้อ้างอิงลำดับ/วันเสร็จของ Item ก่อนหน้า</b>: กรอกไว้แล้ว Item นั้นจะเริ่มที่<b>ต้นกะของวันที่กรอก</b>ทันที ไม่ว่าจะอยู่ลำดับที่เท่าไรในแผน (ถ้ากรอกตรงวันอาทิตย์จะเลื่อนเป็นต้นกะของวันจันทร์) · ปล่อยว่างไว้ Item นั้นยังไล่ตามลำดับในแผนตามปกติ ${plan.overlap
             ? 'ทั้งนี้วันเริ่มที่กำหนดเป็น<b>จุดเริ่มเร็วที่สุด</b> ถ้าคนของหน่วยแรกยังติดงานอื่นอยู่ งานจะเริ่มได้จริงช้ากว่านั้น ระบบจะขึ้นป้ายบอกส่วนต่างไว้ที่หัวใบ Item และในตารางสรุปด้านล่าง'
             : 'ในโหมดทำจบทีละขั้น คิวจะถูกดึงไปเริ่มที่วันนั้นเลย Item ที่อยู่ถัดไปในลำดับจึงเดินต่อจาก Item ใบนี้'}${plan.delayedStarts ? ' · ตอนนี้มี <b>' + fmtNum(plan.delayedStarts) + '</b> Item ที่เริ่มจริงช้ากว่าวันที่กำหนดไว้' : ''} · ถ้ากรอกวันเริ่มไว้ก่อน “เริ่มผลิตวันที่” ของทั้งใบ จุดตั้งต้นของแผนจะถอยไปตามวันนั้นให้เอง</li>
         <li><b>Lead time รายไอเทม</b> — แผงสรุปภาพรวมล่างสุดวัดจากขั้นตอนแรกของ Item นั้นเริ่มลงมือ จนขั้นตอนสุดท้ายเสร็จ (นับเฉพาะเวลาทำงาน) ซึ่งยาวกว่าผลรวมชั่วโมงเดินเครื่องเสมอ ส่วนต่างคือเวลารอของจากหน่วยก่อนหน้าและรอคิวคน</li>
+        <li><b>แผนแนะนำ (แผงล่างสุด)</b> — ลองสลับลำดับการขึ้นงานหลายแบบ (กำหนดใกล้ก่อน / เหลือเวลาน้อยก่อน / ใบเล็กก่อน / ใบใหญ่ก่อน) แล้ว<b>คำนวณทั้งแผนใหม่จริงทุกแบบ</b> ไม่ได้เดาจากสูตร เพราะคิวคนกับการส่งต่อระหว่างหน่วยทำให้ผลของลำดับคาดเดาไม่ได้ · เลือกโดยดู<b>จำนวนใบที่ทำไม่ทันก่อน</b> ถ้าเท่ากันจึงดูชั่วโมงที่เลยกำหนดรวม แล้วจึงดูวันที่ทั้งแผนเสร็จ — บางครั้งวันเสร็จทั้งแผนจึงถอยออกไปเล็กน้อยเพื่อแลกกับการส่งทันทุกใบ ซึ่งจะบอกไว้ให้เห็นเสมอ · ลองไม่ครบทุกลำดับ (14 ใบ = 87 พันล้านแบบ) จึงเป็น<b>ลำดับที่ดีที่สุดเท่าที่ลองไหว</b> ไม่ใช่คำตอบที่ดีที่สุดทางคณิตศาสตร์ · Item ที่กรอกวันเริ่มเองไว้ไม่ได้อ้างอิงลำดับ การสลับจึงแทบไม่มีผลกับใบพวกนั้น</li>
         <li><b>ลำดับ Item</b> — ${plan.overlap
             ? 'ทุก Item เริ่มพร้อมกันได้ถ้ากำลังคนพอ ลำดับในแผนใช้ตัดสินเฉพาะตอนงานพร้อมพร้อมกันแล้วต้องแย่งคนกัน (Item ที่อยู่บนกว่าได้ก่อน)'
             : 'Item ขึ้นงานไล่ตามลำดับในแผน (Item ถัดไปเริ่มเมื่อ Item ก่อนหน้าเสร็จ)'} สลับลำดับด้วยปุ่ม ▲▼ ในกล่องรายการ Item ด้านบนได้ แล้วกดคำนวณอีกครั้ง · <b>ยกเว้น Item ที่กรอก “วันเริ่ม” ของตัวเองไว้</b> — ใบพวกนั้นยึดวันที่กรอกเป็นหลัก ไม่ได้อ้างอิงลำดับหรือวันเสร็จของ Item ก่อนหน้า</li>
@@ -4107,11 +4265,102 @@ function renderPlanner(){
       </ul>
     </div>`;
 
+  // ---------- แผนแนะนำ: ลำดับการขึ้นงานที่ทำทันกำหนดมากที่สุดและเสร็จเร็วที่สุด ----------
+  const suggestHtml = (!plan.show.suggest || plan.jobs.length < 2) ? '' : (()=>{
+    const head = `<div class="plan-panel-head">
+        <h2>แผนแนะนำ — ควรขึ้นงาน Item ไหนก่อน</h2>
+        <button class="plan-collapse" data-showpanel="suggest">▾ ซ่อน</button>
+      </div>`;
+    const sug = planSuggestionCached();
+    if(!sug){
+      return `<div class="panel plan-suggest" style="margin-top:16px;">${head}
+        <div class="panel-note">กำลังลองสลับลำดับแล้วคำนวณทั้งแผนซ้ำทีละแบบ — สักครู่จะขึ้นให้เอง</div>
+      </div>`;
+    }
+    const cur = sug.current.score, bst = sug.best.score;
+    const fixed = cur.late - bst.late;
+    const fasterH = (sug.best.plan.finishDt && sug.current.plan.finishDt && sug.best.plan.finishDt < sug.current.plan.finishDt)
+      ? planWorkingHoursBetween(sug.best.plan.finishDt, sug.current.plan.finishDt, plan.hpd, plan.shiftMin) : 0;
+    const pinned = sug.best.plan.jobs.filter(j=> j.startPinned).length;
+    // ยึดกำหนดส่งก่อนเสมอ ดังนั้นบางครั้งวันเสร็จทั้งแผนจะถอยออกไป — บอกส่วนที่แลกไปด้วย ไม่ใช่โชว์แต่ข้อดี
+    const slowerH = (sug.best.plan.finishDt && sug.current.plan.finishDt && sug.best.plan.finishDt > sug.current.plan.finishDt)
+      ? planWorkingHoursBetween(sug.current.plan.finishDt, sug.best.plan.finishDt, plan.hpd, plan.shiftMin) : 0;
+    const gains = [
+      fixed > 0 ? `ทำทันกำหนดเพิ่ม <b>${fmtNum(fixed)}</b> ใบ` : '',
+      fasterH > 0.05 ? `ทั้งแผนเสร็จเร็วขึ้น <b>${fmtNum(fasterH/plan.hpd,2)}</b> วันทำงาน` : '',
+      (fixed <= 0 && cur.lateHours - bst.lateHours > 0.05) ? `เลยกำหนดรวมน้อยลง <b>${fmtHM(cur.lateHours - bst.lateHours)}</b> ชม.` : '',
+      (fixed <= 0 && fasterH <= 0.05 && cur.lateHours - bst.lateHours <= 0.05) ? `เหลือเวลาก่อนกำหนดรวมมากขึ้น <b>${fmtHM(bst.slackHours - cur.slackHours)}</b> ชม.` : ''
+    ].filter(Boolean).join(' · ');
+    const verdict = sug.sameAsCurrent
+      ? `<div class="plan-suggest-verdict good">ลำดับที่ใช้อยู่ตอนนี้ดีที่สุดเท่าที่ลองแล้ว — ไม่ต้องสลับอะไร</div>`
+      : `<div class="plan-suggest-verdict good">${gains}${slowerH > 0.05
+          ? `<span class="plan-suggest-cost"> — แลกกับทั้งแผนเสร็จช้าลง <b>${fmtNum(slowerH/plan.hpd,2)}</b> วันทำงาน เพราะยกใบที่มีกำหนดใกล้ขึ้นมาทำก่อน</span>` : ''}</div>`;
+    // ไม่ได้กรอกกำหนดเสร็จไว้เลย = ไม่มีอะไรให้วัดว่าทันหรือไม่ทัน เหลือเกณฑ์เดียวคือทั้งแผนเสร็จเร็วที่สุด
+    const noDue = sug.best.plan.jobs.every(j=> !j.dueDt);
+    const card = (title, sc, plan2, cls)=> `<div class="plan-suggest-card ${cls}">
+        <div class="plan-suggest-card-t">${title}</div>
+        <div class="plan-suggest-card-v ${noDue ? '' : (sc.late ? 'bad' : 'good')}">${
+          noDue ? 'เสร็จทั้งแผน ' + planFmtDateTime(plan2.finishDt)
+                : (sc.late ? 'ทำไม่ทัน ' + fmtNum(sc.late) + ' ใบ' : 'ทันกำหนดทุกใบ')}</div>
+        <div class="plan-suggest-card-s">${noDue ? 'ยังไม่ได้กรอกกำหนดเสร็จ จึงเทียบได้แค่วันที่เสร็จ'
+          : 'เสร็จทั้งแผน ' + planFmtDateTime(plan2.finishDt) + (sc.late
+              ? ' · เลยกำหนดรวม ' + fmtHM(sc.lateHours) + ' ชม.'
+              : ' · เหลือเวลารวม ' + fmtHM(sc.slackHours) + ' ชม.')}</div>
+      </div>`;
+    const posOf = new Map(sug.jobs.map((j,i)=> [j, i]));
+    const rows = sug.best.plan.jobs.map((jp,i)=>{
+      const from = posOf.get(jp.job);
+      const delta = from - i;
+      const move = delta === 0 ? '<span class="plan-src">คงที่</span>'
+        : `<span class="plan-move-tag ${delta > 0 ? 'up' : 'down'}">${delta > 0 ? '▲ ขึ้น ' + delta : '▼ ลง ' + (-delta)}</span>`;
+      return `<tr>
+        <td class="num mono">${i+1}</td>
+        <td class="num mono">#${from+1} ${move}</td>
+        <td class="mono">${escapeHtml(jp.job.item)}${jp.startPinned ? '<div class="plan-src">กำหนดวันเริ่มเอง</div>' : ''}</td>
+        <td class="num mono">${fmtNum(jp.qty)}</td>
+        <td class="mono">${jp.dueIso ? planFmtDate(jp.dueIso) : '<span class="plan-src">ไม่มีกำหนด</span>'}</td>
+        <td class="mono">${jp.end_dt ? planFmtDateTime(jp.end_dt) : '—'}</td>
+        <td>${jp.due ? `<span class="pill ${jp.due.late ? 'bad' : 'good'}">${planDueText(jp.due)}</span>` : '<span class="plan-src">—</span>'}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="panel plan-suggest" style="margin-top:16px;">${head}
+      <div class="panel-note">ลองสลับลำดับการขึ้นงานแล้ว<b>คำนวณทั้งแผนใหม่จริงๆ ทีละแบบ</b> (ไม่ได้เดาจากสูตร เพราะคิวคนและการส่งต่อระหว่างหน่วยทำให้ผลของลำดับคาดเดาไม่ได้) แล้วเลือกลำดับที่<b>ทำทันกำหนดมากที่สุดก่อน</b> ถ้าทันเท่ากันจึงเลือกอันที่<b>ทั้งแผนเสร็จเร็วที่สุด</b>${
+        sug.tuned ? ' · ลำดับนี้มาจากกฎ “' + escapeHtml(sug.best.label) + '” แล้วขยับใบที่ยังไม่ทันขึ้นมาเพิ่มอีก' : (sug.sameAsCurrent ? '' : ' · ลำดับนี้มาจากกฎ “' + escapeHtml(sug.best.label) + '”')}${
+        pinned ? ' · <b>' + fmtNum(pinned) + ' ใบกรอกวันเริ่มเองไว้</b> ใบพวกนั้นยึดวันที่กรอกเป็นหลัก ลำดับจึงไม่ค่อยมีผล' : ''}${
+        noDue ? ' · <b>ยังไม่ได้กรอกกำหนดเสร็จเลยสักใบ</b> ตอนนี้จึงจัดให้ทั้งแผนเสร็จเร็วที่สุดอย่างเดียว — ใส่กำหนดส่งแล้วจะแนะนำได้ตรงกว่านี้' : ''}</div>
+      <div class="plan-suggest-cmp">
+        ${card('ลำดับปัจจุบัน', cur, sug.current.plan, '')}
+        ${card('ลำดับแนะนำ', bst, sug.best.plan, 'best')}
+      </div>
+      ${verdict}
+      <div class="table-wrap" style="margin-top:14px;">
+        <table class="plan-step-table plan-suggest-table">
+          <thead>
+            <tr>
+              <th class="num">ลำดับใหม่</th>
+              <th class="num">เดิมอยู่ลำดับ</th>
+              <th>Item</th>
+              <th class="num">จำนวน (ชิ้น)</th>
+              <th>กำหนดเสร็จ</th>
+              <th>คาดว่าเสร็จ</th>
+              <th>สถานะ</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      ${sug.sameAsCurrent ? '' : `<div class="plan-actions">
+        <button class="connect-btn" data-applysuggest="1">ใช้ลำดับนี้กับแผน</button>
+        <span class="plan-src">กดแล้วรายการ Item ด้านบนจะเรียงใหม่ตามนี้และคำนวณให้ทันที (ย้อนกลับได้ด้วยปุ่ม ▲▼ ในกล่องรายการ)</span>
+      </div>`}
+    </div>`;
+  })();
+
   const hiddenNote = viewChips.filter(c=> !plan.show[c.k]).length
     ? `<div class="plan-stale">ซ่อนอยู่ ${viewChips.filter(c=> !plan.show[c.k]).map(c=> c.label.replace(/\s*\(\d+\)$/, '')).join(' · ')} — กดที่แถบด้านบนเพื่อเปิดกลับมา</div>`
     : '';
   box.innerHTML = staleHtml + viewBarHtml + hiddenNote
-    + (plan.show.kpi ? kpiHtml : '') + jobsHtml + balanceHtml + timelineHtml + leadHtml + assumeHtml;
+    + (plan.show.kpi ? kpiHtml : '') + jobsHtml + balanceHtml + timelineHtml + leadHtml + assumeHtml + suggestHtml;
   planFitTimelineLabels();
 }
 
@@ -4378,6 +4627,11 @@ function planRenderShiftInputs(){
       const k = showBtn.getAttribute('data-showpanel');
       planState.show[k] = !planState.show[k];
       renderPlanner();
+      return;
+    }
+    const applySuggest = e.target.closest('[data-applysuggest]');
+    if(applySuggest){
+      planApplySuggestedOrder();
       return;
     }
     const showAll = e.target.closest('[data-showall]');
