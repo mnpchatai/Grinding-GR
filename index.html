@@ -2768,6 +2768,19 @@ const PLAN_RATE_SRC_LABEL = {
   manual: 'แก้เอง'
 };
 const PLAN_RANK_LABEL = {standard:'· ลำดับมาตรฐาน', standalone:'· ขั้นตอนแยก', manual:'· เพิ่มเอง'};
+/** อัตรา (ชิ้น/ชม.) แบบอ่านง่าย — ตัดทศนิยมที่ไม่จำเป็นทิ้ง เช่น 3 / 3.5 / 12.75 */
+function planFmtRate(n){
+  if(n === null || n === undefined || isNaN(n)) return '—';
+  return Number(planRound2(n)).toLocaleString('en-US',{maximumFractionDigits:2});
+}
+/** บรรทัด “เป้า/ชม.” ของขั้นตอนหนึ่ง — เป็นอัตรารวมทุกสถานี พร้อมที่มาของตัวเลข */
+function planRateNote(r){
+  if(!(r.rate > 0)) return 'ยังไม่มีอัตราการผลิต — กรอกช่อง “อัตรา (ชิ้น/ชม.)” ในตารางขั้นตอน';
+  const src = r.rate_src ? (PLAN_RATE_SRC_LABEL[r.rate_src] || '') : '';
+  return `เป้า ${planFmtRate(r.rate * r.stations)} ชิ้น/ชม.`
+    + (r.stations > 1 ? ` (${planFmtRate(r.rate)} × ${r.stations} สถานี)` : '')
+    + (src ? ` · ${src}` : '');
+}
 
 // ---------- Production planner: Export เป็น Excel (.xlsx) ----------
 // สร้างไฟล์ .xlsx จริงแบบไม่พึ่งไลบรารีภายนอก โดยประกอบไฟล์ ZIP เอง (เก็บแบบไม่บีบอัด)
@@ -3642,6 +3655,7 @@ function renderPlanner(){
       : `${fmtNum(r.days,2)} วัน`;
     const tip = `${r.step.dept}${r.owner ? ' (' + r.owner + ')' : ''} — ${material}`
       + `\nต้องทำ ${fmtNum(r.qty_in)} ชิ้น · เดินเครื่อง ${fmtNum(r.days,2)} วัน (${fmtHM(r.hours)} ชม.)`
+      + `\n${planRateNote(r)}`
       + (intermittent ? `\nคร่อมช่วง ${fmtNum(spanHours/plan.hpd,2)} วัน — รอของระหว่างทำรวม ${fmtHM(idleHours)} ชม.` : '')
       + `\n${planFmtDateTime(r.tl_start)} → ${planFmtDateTime(r.tl_end)}`;
     // ป้ายวางนอกแท่ง แท่งสั้นๆ จึงยังอ่านออก (เดิมป้ายอยู่ในแท่งแล้วถูกตัดจนเหลือตัวเดียว)
