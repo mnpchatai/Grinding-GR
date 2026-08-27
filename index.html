@@ -826,11 +826,15 @@
 
 <div id="authGate" class="auth-gate">
   <div class="auth-card">
+    <!-- ปุ่มสลับภาษาถูกถอดออกเพราะตอนนี้มีแค่ไทยภาษาเดียว (ไฟล์ _TW / _MM ไม่มีใน repo)
+         จะเอากลับมาใช้: อัปโหลดไฟล์ภาษานั้นเข้า repo ก่อน แล้วเพิ่มชื่อไฟล์ใน LANG_FILES
+         ที่ <head> จากนั้นค่อยเปิดบล็อกนี้ (สไตล์ .lang-switch / .lang-btn ยังอยู่ครบ)
     <div class="lang-switch">
       <a href="./" class="lang-btn active" onclick="localStorage.setItem('gr_lang','th')">ไทย</a>
       <a href="GR_Production_Dashboard_TW.html" class="lang-btn" onclick="localStorage.setItem('gr_lang','tw')">繁體中文</a>
       <a href="GR_Production_Dashboard_MM.html" class="lang-btn" onclick="localStorage.setItem('gr_lang','mm')">မြန်မာ</a>
     </div>
+    -->
     <div class="brand-eyebrow"><span class="dot"></span>GR · ACCESS CONTROL</div>
     <h2 class="auth-title">กรุณาใส่รหัสผ่าน</h2>
     <p class="auth-sub">ข้อมูลนี้เป็นข้อมูลภายใน กรุณาใส่รหัสผ่านที่ได้รับเพื่อเข้าดู dashboard</p>
