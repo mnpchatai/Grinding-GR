@@ -758,6 +758,8 @@
   .plan-panel-head h2{margin:0;}
   .plan-job.collapsed .plan-job-body{display:none;}
   .plan-job-sum{font-size:11.5px;color:var(--text-dim);font-family:var(--mono);}
+  .plan-shift-note{font-size:10.5px;color:var(--text-faint);margin-top:4px;line-height:1.6;}
+  .plan-shift-note.bad{color:var(--bad);}
   /* ไทม์ไลน์ของ Item — อยู่ในใบเดียวกับตารางขั้นตอน จะได้อ่านคู่กันโดยไม่ต้องเลื่อนไปหาแผงรวม */
   .plan-job-tl{margin-top:18px;padding-top:14px;border-top:1px dashed var(--border);}
   .plan-job-tl h3{margin:0 0 4px;font-family:var(--disp);font-size:13.5px;font-weight:600;color:var(--text);}
@@ -945,10 +947,6 @@
         <input type="text" id="planPO" class="search-box" placeholder="เช่น 26006" autocomplete="off">
       </div>
       <div class="filter-group">
-        <span class="filter-label">ชั่วโมงทำงาน/วัน</span>
-        <input type="number" id="planHoursPerDay" class="search-box plan-num" min="0.5" max="24" step="0.5" value="8">
-      </div>
-      <div class="filter-group">
         <span class="filter-label">เริ่มผลิตวันที่</span>
         <input type="date" id="planStartDate" class="search-box plan-num">
       </div>
@@ -959,6 +957,16 @@
       <div class="filter-group">
         <span class="filter-label">เวลาเริ่มกะ</span>
         <input type="time" id="planShiftStart" class="search-box plan-num" value="08:00">
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">เวลาเลิกงาน</span>
+        <input type="time" id="planShiftEnd" class="search-box plan-num" value="16:45">
+      </div>
+      <div class="filter-group" style="flex:1.6;min-width:340px;">
+        <span class="filter-label">ช่วงพัก (คั่นด้วยจุลภาค)</span>
+        <input type="text" id="planBreaks" class="search-box" style="width:100%;" placeholder="เช่น 10:05-10:20, 12:00-12:50" autocomplete="off"
+               title="ช่วงที่หยุดเดินเครื่อง — ถูกตัดออกจากเวลาทำงาน แต่ยังกินเวลานาฬิกา งานที่คร่อมช่วงพักจึงจบช้ากว่าเดิม">
+        <div class="plan-shift-note" id="planShiftNote"></div>
       </div>
       <div class="filter-group">
         <span class="filter-label">เผื่อของเสีย (%)</span>
@@ -1757,6 +1765,11 @@ function standardStepRank(dept){
   const i = STEP_ORDER.indexOf(dept);
   return i !== -1 ? {rank: i + 1, src: 'standard'} : {rank: null, src: 'standalone'};
 }
+// ตารางกะมาตรฐานของโรงงาน — เข้า 08:00 เลิก 16:45 พักเบรกเช้า/เที่ยง/บ่าย รวม 1:20 ชม.
+// เหลือเวลาทำงานสุทธิ 7:25 ชม./วัน
+const PLAN_DEFAULT_SHIFT_END = '16:45';
+const PLAN_DEFAULT_BREAKS = [{s:'10:05', e:'10:20'}, {s:'12:00', e:'12:50'}, {s:'15:05', e:'15:20'}];
+
 /** กุญแจของขั้นตอนหนึ่ง = หน่วยงาน + ชิ้นส่วน(วัตถุดิบ) — Item เดียวกันอาจมีหลายชิ้นส่วนผ่านหน่วยงานเดียวกัน (เช่น เจียร์บอล กับ เจียร์พิน) */
 function planStepKey(dept, material){
   return dept + '' + (material || '').trim();
@@ -1766,11 +1779,17 @@ function planStepKey(dept, material){
 const planState = {
   customer: '',
   po: '',
+  // ชั่วโมงทำงานสุทธิต่อวัน — ไม่ได้กรอกเอง แต่คำนวณจาก เริ่มกะ → เลิกงาน หักเวลาพัก
+  // (ยังเก็บไว้ในสถานะและในแผนที่บันทึก เพราะทุกอย่างที่แปลงชั่วโมงเป็นวันใช้ค่านี้)
   hoursPerDay: 8,
   startIso: '',
   // กำหนดเสร็จของทั้งใบสั่งผลิต (ว่าง = ยังไม่มีกำหนด) — Item ที่ไม่ได้กรอกกำหนดของตัวเองใช้ค่านี้
   dueIso: '',
   shiftStart: '08:00',
+  shiftEnd: PLAN_DEFAULT_SHIFT_END,
+  // ช่วงพักในกะ — เวลาพวกนี้ถูกตัดออกจากเวลาทำงาน แต่ยังกินเวลานาฬิกา
+  // งานที่คร่อมช่วงพักจึงจบช้ากว่าเดิมตามจริง แทนที่จะเดินรวดเดียวจนครบชั่วโมง
+  breaks: PLAN_DEFAULT_BREAKS.map(b=> ({s: b.s, e: b.e})),
   scrapPct: 0,
   rateBasis: 'target_100',
   // overlap = หน่วยถัดไปเริ่มทันทีที่หน่วยก่อนหน้าผลิตของถึงเกณฑ์ (ไม่รอทั้งล็อต), serial = ทำจบทีละขั้นแบบเดิม
@@ -1841,54 +1860,158 @@ function planTimeToMinutes(hhmm){
   if(!m) return 8*60;
   return Math.min(23*60+59, Math.max(0, parseInt(m[1],10)*60 + parseInt(m[2],10)));
 }
-/** เลื่อนเวลาไปยังจุดเริ่มกะที่ใกล้ที่สุด ถ้ายังไม่อยู่ในช่วงเวลาทำงาน (ข้ามวันอาทิตย์) */
+function planMinutesToTime(min){
+  const m = Math.max(0, Math.min(24*60-1, Math.round(min)));
+  return String(Math.floor(m/60)).padStart(2,'0') + ':' + String(m%60).padStart(2,'0');
+}
+/** เวลา ณ นาทีที่กำหนดของวันเดียวกับ d — รับทศนิยมนาทีได้ (setMinutes ปัดทิ้งเศษ จึงบวกเป็นมิลลิวินาทีแทน) */
+function planAtMinute(d, min){
+  const x = new Date(d.getTime());
+  x.setHours(0,0,0,0);
+  return new Date(x.getTime() + Math.round(min*60000));
+}
+/** ช่วงพักของกะ เป็นนาทีจากเที่ยงคืน — เรียงตามเวลาและรวมช่วงที่ทับกัน กันหักเวลาซ้ำสองรอบ */
+function planBreakRanges(){
+  const raw = (planState.breaks || [])
+    .map(b=> ({s: planTimeToMinutes(b.s), e: planTimeToMinutes(b.e)}))
+    .filter(b=> b.e > b.s)
+    .sort((a,b)=> a.s - b.s);
+  const out = [];
+  raw.forEach(b=>{
+    const last = out[out.length-1];
+    if(last && b.s <= last.e) last.e = Math.max(last.e, b.e);
+    else out.push({s: b.s, e: b.e});
+  });
+  return out;
+}
+/** นาทีพักที่ตกอยู่ในช่วง [a,b) ของวันเดียวกัน */
+function planBreakMinutesBetween(a, b){
+  if(b <= a) return 0;
+  return planBreakRanges().reduce((sum, br)=> sum + Math.max(0, Math.min(br.e, b) - Math.max(br.s, a)), 0);
+}
+/** นาทีเลิกงานของกะ (จากเที่ยงคืน) — ยึดเวลาเลิกงานที่กรอกไว้ */
+function planDayEndMin(){
+  const shiftMin = planTimeToMinutes(planState.shiftStart);
+  const end = planTimeToMinutes(planState.shiftEnd);
+  return end > shiftMin ? end : shiftMin + 60;
+}
+/** ชั่วโมงทำงานสุทธิต่อวัน = ตั้งแต่เริ่มกะถึงเลิกงาน หักเวลาพักออก */
+function planNetHoursPerDay(){
+  const shiftMin = planTimeToMinutes(planState.shiftStart);
+  const endMin = planDayEndMin();
+  return Math.max(0.25, (endMin - shiftMin - planBreakMinutesBetween(shiftMin, endMin))/60);
+}
+/** อ่านช่วงพักจากข้อความที่พิมพ์ เช่น "10:05-10:20, 12:00-12:50" (รับ - – — และขึ้นบรรทัดใหม่เป็นตัวคั่นได้) */
+function planParseBreaks(text){
+  return String(text || '').split(/[,\n;·]+/).map(part=>{
+    const m = /^\s*(\d{1,2}:\d{2})\s*[-–—]\s*(\d{1,2}:\d{2})\s*$/.exec(part);
+    if(!m) return null;
+    const s0 = planTimeToMinutes(m[1]), e0 = planTimeToMinutes(m[2]);
+    return e0 > s0 ? {s: planMinutesToTime(s0), e: planMinutesToTime(e0)} : null;
+  }).filter(Boolean);
+}
+/** ช่วงพักกลับเป็นข้อความสำหรับช่องกรอก */
+function planBreaksText(){
+  return planBreakRanges().map(b=> planMinutesToTime(b.s) + '-' + planMinutesToTime(b.e)).join(', ');
+}
+/** เวลาเลิกงานที่ทำให้ได้ชั่วโมงทำงานสุทธิเท่าที่ต้องการ — ใช้กับแผนเก่าที่บันทึกไว้ก่อนมีช่องเวลาพัก
+ *  ต้องวนซ้ำเพราะยิ่งเลิกช้า ก็ยิ่งคาบช่วงพักเพิ่ม ซึ่งดันเวลาเลิกออกไปอีก */
+function planShiftEndForHours(hours){
+  const shiftMin = planTimeToMinutes(planState.shiftStart);
+  let end = shiftMin + hours*60;
+  for(let i = 0; i < 8; i++){
+    const next = shiftMin + hours*60 + planBreakMinutesBetween(shiftMin, end);
+    const settled = Math.abs(next - end) < 0.5;
+    end = next;
+    if(settled) break;
+  }
+  return planMinutesToTime(Math.min(24*60-1, end));
+}
+/** ชั่วโมงทำงาน/วัน เป็นค่าที่คำนวณจากตารางกะ — เรียกทุกครั้งที่เวลาเริ่ม/เลิก/ช่วงพักเปลี่ยน */
+function planSyncHoursPerDay(){
+  planState.hoursPerDay = planNetHoursPerDay();
+  return planState.hoursPerDay;
+}
+/** ข้อความสรุปตารางกะ ใช้ซ้ำทั้งใต้ช่องกรอก บนไทม์ไลน์ และในไฟล์ Export */
+function planShiftSummaryText(){
+  const shiftMin = planTimeToMinutes(planState.shiftStart);
+  const endMin = planDayEndMin();
+  const brk = planBreakMinutesBetween(shiftMin, endMin);
+  return 'กะ ' + planMinutesToTime(shiftMin) + '–' + planMinutesToTime(endMin)
+    + (brk > 0 ? ' · พัก ' + fmtHM(brk/60) + ' ชม.' : ' · ไม่มีเวลาพัก')
+    + ' · ทำงานสุทธิ ' + fmtHM(planNetHoursPerDay()) + ' ชม./วัน';
+}
+/** เวลาทำงานจริง (นาที) ระหว่างสองจุดในวันเดียวกัน — หักช่วงพักที่คั่นอยู่ */
+function planWorkMinutesInDay(a, b){
+  if(b <= a) return 0;
+  return Math.max(0, (b - a) - planBreakMinutesBetween(a, b));
+}
+/** เดินจากนาที a ไปข้างหน้าตามเวลาทำงาน m นาที โดยข้ามช่วงพัก
+ *  คืนนาทีที่ไปถึง หรือ null ถ้าเวลาทำงานที่เหลือของวันนี้ไม่พอ */
+function planAdvanceInDay(a, m, endMin){
+  let cur = Math.max(a, 0), remain = m;
+  for(const br of planBreakRanges()){
+    if(br.e <= cur || br.s >= endMin) continue;
+    if(cur < br.s){
+      const chunk = Math.min(br.s, endMin) - cur;
+      if(remain <= chunk + 1e-9) return cur + remain;
+      remain -= chunk;
+    }
+    cur = Math.min(br.e, endMin);
+  }
+  const tail = endMin - cur;
+  return remain <= tail + 1e-9 ? cur + remain : null;
+}
+/** เลื่อนเวลาไปยังจุดที่ "ลงมือทำงานได้จริง" ที่ใกล้ที่สุด — ข้ามช่วงพัก นอกกะ และวันอาทิตย์ */
 function planClampToShift(from, hpd, shiftMin){
   let d = new Date(from.getTime());
-  const setToShiftStart = ()=>{ d.setHours(0,0,0,0); d.setMinutes(shiftMin); };
-  if(d.getDay() === 0){ d.setDate(d.getDate()+1); setToShiftStart(); return d; }
-  const dayEndMin = shiftMin + hpd*60;
-  const curMin = d.getHours()*60 + d.getMinutes();
-  if(curMin < shiftMin){
-    setToShiftStart();
-  } else if(curMin >= dayEndMin){
+  const endMin = planDayEndMin();
+  const nextWorkdayStart = ()=>{
     d.setDate(d.getDate()+1);
     while(d.getDay() === 0) d.setDate(d.getDate()+1);
-    setToShiftStart();
+    d.setHours(0,0,0,0); d.setMinutes(shiftMin);
+  };
+  if(d.getDay() === 0){ nextWorkdayStart(); return d; }
+  const curMin = d.getHours()*60 + d.getMinutes();
+  if(curMin < shiftMin){ d.setHours(0,0,0,0); d.setMinutes(shiftMin); return d; }
+  if(curMin >= endMin){ nextWorkdayStart(); return d; }
+  // ตกอยู่ในช่วงพัก — เริ่มลงมือได้จริงตอนพักจบ (ถ้าพักคาบเลิกงานก็ข้ามไปวันถัดไป)
+  const br = planBreakRanges().find(b=> curMin >= b.s && curMin < b.e);
+  if(br){
+    if(br.e >= endMin) nextWorkdayStart();
+    else { d.setHours(0,0,0,0); d.setMinutes(br.e); }
   }
   return d;
 }
-/** เดินเวลาทำงานไปข้างหน้าตามจำนวนชั่วโมง ข้ามช่วงนอกกะและวันอาทิตย์ */
+/** เดินเวลาทำงานไปข้างหน้าตามจำนวนชั่วโมง ข้ามช่วงพัก นอกกะ และวันอาทิตย์ */
 function planAdvanceHours(from, hours, hpd, shiftMin){
   let d = planClampToShift(from, hpd, shiftMin);
-  let remain = Math.max(0, hours || 0);
-  const dayEndMin = shiftMin + hpd*60;
-  while(remain > 1e-9){
-    const curMin = d.getHours()*60 + d.getMinutes();
-    const availHr = (dayEndMin - curMin)/60;
-    if(remain <= availHr + 1e-9){
-      d = new Date(d.getTime() + remain*3600000);
-      remain = 0;
-    } else {
-      remain -= availHr;
-      d.setDate(d.getDate()+1);
-      while(d.getDay() === 0) d.setDate(d.getDate()+1);
-      d.setHours(0,0,0,0); d.setMinutes(shiftMin);
-    }
+  let remain = Math.max(0, hours || 0) * 60;
+  const endMin = planDayEndMin();
+  let guard = 0;
+  while(remain > 1e-9 && guard++ < 5000){
+    const curMin = (d.getTime() - planAtMinute(d, 0).getTime())/60000;
+    const hit = planAdvanceInDay(curMin, remain, endMin);
+    if(hit != null){ d = planAtMinute(d, hit); break; }
+    remain -= planWorkMinutesInDay(curMin, endMin);
+    d.setDate(d.getDate()+1);
+    while(d.getDay() === 0) d.setDate(d.getDate()+1);
+    d.setHours(0,0,0,0); d.setMinutes(shiftMin);
   }
   return d;
 }
-/** ชั่วโมงทำงานจริงระหว่างสองเวลา (ตัดเวลานอกกะและวันอาทิตย์ออก) — ใช้วัดระยะเวลาของแผนที่ทำงานทับซ้อนกัน */
+/** ชั่วโมงทำงานจริงระหว่างสองเวลา (ตัดช่วงพัก เวลานอกกะ และวันอาทิตย์ออก) */
 function planWorkingHoursBetween(from, to, hpd, shiftMin){
   if(!from || !to || to <= from) return 0;
   let d = planClampToShift(from, hpd, shiftMin);
-  const dayEndMin = shiftMin + hpd*60;
+  const endMin = planDayEndMin();
   let total = 0, guard = 0;
   while(d < to && guard++ < 5000){
-    const dayEnd = new Date(d.getTime());
-    dayEnd.setHours(0,0,0,0);
-    dayEnd.setMinutes(dayEndMin);
-    const stop = Math.min(dayEnd.getTime(), to.getTime());
-    if(stop > d.getTime()) total += (stop - d.getTime())/3600000;
+    const dayEnd = planAtMinute(d, endMin);
+    const stopTime = Math.min(dayEnd.getTime(), to.getTime());
+    const curMin = (d.getTime() - planAtMinute(d, 0).getTime())/60000;
+    const stopMin = curMin + (stopTime - d.getTime())/60000;
+    total += planWorkMinutesInDay(curMin, stopMin)/60;
     d = new Date(dayEnd.getTime());
     d.setDate(d.getDate()+1);
     while(d.getDay() === 0) d.setDate(d.getDate()+1);
@@ -1908,7 +2031,7 @@ function planDueDateTime(iso, hpd, shiftMin){
   if(isNaN(d.getTime())) return null;
   while(d.getDay() === 0) d.setDate(d.getDate()-1);
   d.setHours(0,0,0,0);
-  d.setMinutes(shiftMin + hpd*60);
+  d.setMinutes(planDayEndMin());
   return d;
 }
 /** วันเริ่มที่กำหนดให้ Item หนึ่งโดยเฉพาะ = เริ่มที่ "เวลาเริ่มกะ" ของวันนั้น
@@ -2352,7 +2475,7 @@ function planOwnerOptions(){
  * ขั้นตอนไหน ให้ยึดค่านั้นแล้วไล่ย้อนต่อจากค่านั้นขึ้นไป
  */
 function computePlan(){
-  const hpd = planState.hoursPerDay > 0 ? planState.hoursPerDay : 8;
+  const hpd = planSyncHoursPerDay();   // = เริ่มกะ → เลิกงาน หักเวลาพัก
   const keep = 1 - Math.min(90, Math.max(0, planState.scrapPct))/100;
   const startIso = planState.startIso || planTodayIso();
   const shiftMin = planTimeToMinutes(planState.shiftStart);
@@ -2941,7 +3064,10 @@ function planExportExcel(){
     ['เลขที่ใบสั่งผลิต', planState.po || '—'],
     ['เริ่มผลิตวันที่', planFmtDateTime(plan.startDt)],
     ['กำหนดเสร็จ (ทั้งใบสั่งผลิต)', plan.dueDt ? planFmtDate(plan.dueIso) : '—'],
-    ['ชั่วโมงทำงาน/วัน', plan.hpd],
+    ['เวลาเริ่มกะ', planState.shiftStart],
+    ['เวลาเลิกงาน', planState.shiftEnd],
+    ['ช่วงพัก', planBreaksText() || 'ไม่มี'],
+    ['ชั่วโมงทำงาน/วัน (สุทธิหลังหักพัก)', planRound2(plan.hpd)],
     ['เผื่อของเสีย (%)', planState.scrapPct],
     ['ฐานอัตราการผลิต', rateBasisLabel],
     ['การส่งงานระหว่างหน่วย', plan.overlap ? 'ส่งต่อระหว่างทำ (หน่วยถัดไปเริ่มเมื่อของถึงเกณฑ์)' : 'ทำจบทีละขั้น'],
@@ -3065,8 +3191,10 @@ function planSnapshotCurrent(){
     savedAt: new Date().toISOString(),
     customer: planState.customer,
     po: planState.po,
-    hoursPerDay: planState.hoursPerDay,
+    hoursPerDay: planSyncHoursPerDay(),
     shiftStart: planState.shiftStart,
+    shiftEnd: planState.shiftEnd,
+    breaks: planBreakRanges().map(b=> ({s: planMinutesToTime(b.s), e: planMinutesToTime(b.e)})),
     startIso: planState.startIso,
     dueIso: planState.dueIso,
     scrapPct: planState.scrapPct,
@@ -3180,8 +3308,14 @@ async function planUpdateSavedPlan(){
 function planApplySnapshotToState(entry){
   planState.customer = entry.customer || '';
   planState.po = entry.po || '';
-  planState.hoursPerDay = entry.hoursPerDay > 0 ? entry.hoursPerDay : 8;
   planState.shiftStart = entry.shiftStart || '08:00';
+  // แผนที่บันทึกไว้ก่อนมีช่องเวลาพัก เก็บมาแค่ "ชั่วโมงทำงาน/วัน" — ใส่ช่วงพักมาตรฐานให้
+  // แล้วตั้งเวลาเลิกงานย้อนกลับจากชั่วโมงเดิม ระยะเวลาของแผนจึงเท่าเดิม เปลี่ยนแค่เวลานาฬิกาในวันให้ตรงจริง
+  planState.breaks = Array.isArray(entry.breaks)
+    ? planParseBreaks(entry.breaks.map(b=> (b && b.s ? b.s + '-' + b.e : '')).join(','))
+    : PLAN_DEFAULT_BREAKS.map(b=> ({s: b.s, e: b.e}));
+  planState.shiftEnd = entry.shiftEnd || planShiftEndForHours(entry.hoursPerDay > 0 ? entry.hoursPerDay : 8);
+  planSyncHoursPerDay();
   planState.startIso = entry.startIso || planTodayIso();
   // แผนที่บันทึกไว้ก่อนมีช่องกำหนดเสร็จ จะไม่มีค่านี้ ถือว่ายังไม่มีกำหนด
   planState.dueIso = entry.dueIso || '';
@@ -3211,8 +3345,7 @@ function planApplySnapshotToState(entry){
 
   document.getElementById('planCustomer').value = planState.customer;
   document.getElementById('planPO').value = planState.po;
-  document.getElementById('planHoursPerDay').value = planState.hoursPerDay;
-  document.getElementById('planShiftStart').value = planState.shiftStart;
+  planRenderShiftInputs();
   document.getElementById('planStartDate').value = planState.startIso;
   document.getElementById('planDueDate').value = planState.dueIso;
   document.getElementById('planScrap').value = planState.scrapPct;
@@ -3623,7 +3756,7 @@ function renderPlanner(){
     for(let guard = 0; d < tlMax && guard < 2000; guard++){
       const dayEnd = new Date(d.getTime());
       dayEnd.setHours(0,0,0,0);
-      dayEnd.setMinutes(plan.shiftMin + plan.hpd*60);
+      dayEnd.setMinutes(planDayEndMin());
       tlDays.push(new Date(d.getTime()));
       d = new Date(dayEnd.getTime());
       d.setDate(d.getDate()+1);
@@ -3693,7 +3826,7 @@ function renderPlanner(){
     ].filter(Boolean).join('');
     return `<div class="plan-job-tl">
       <h3>ไทม์ไลน์ของ Item นี้</h3>
-      <div class="plan-job-tl-note">แกนนอนนับเฉพาะ<b>เวลาทำงาน</b> — กลางคืนกับวันอาทิตย์ถูกตัดออก ความยาวแท่งจึงเทียบกันได้ตรงๆ (วันละ ${fmtNum(plan.hpd,0)} ชม. เริ่มกะ ${escapeHtml(planState.shiftStart)}) · ตำแหน่งและความยาวอิงเวลาเริ่ม-จบจริงของแต่ละขั้นตอน รวมเวลาที่แก้เองในตารางด้านบน (ขยับตามที่แก้ทันที) · ทุก Item ใช้แกนเดียวกันทั้งแผน จึงเทียบข้ามใบได้ว่าใบไหนกินช่วงไหน${jp.dueDt ? ' · <b>เส้นประแนวตั้ง</b>คือกำหนดเสร็จของ Item นี้' : ''}</div>
+      <div class="plan-job-tl-note">แกนนอนนับเฉพาะ<b>เวลาทำงาน</b> — กลางคืน วันอาทิตย์ และช่วงพักถูกตัดออก ความยาวแท่งจึงเทียบกันได้ตรงๆ (${escapeHtml(planShiftSummaryText())}) · ตำแหน่งและความยาวอิงเวลาเริ่ม-จบจริงของแต่ละขั้นตอน รวมเวลาที่แก้เองในตารางด้านบน (ขยับตามที่แก้ทันที) · ทุก Item ใช้แกนเดียวกันทั้งแผน จึงเทียบข้ามใบได้ว่าใบไหนกินช่วงไหน${jp.dueDt ? ' · <b>เส้นประแนวตั้ง</b>คือกำหนดเสร็จของ Item นี้' : ''}</div>
       <div class="plan-timeline" style="--tl-grid:${tlGridPct}%;">
         ${tlAxisHtml}
         ${jp.main.map(r=> tlRow(r, false, dueMark)).join('')}
@@ -3811,7 +3944,7 @@ function renderPlanner(){
         <h2>ไทม์ไลน์โดยประมาณ (ทุก Item)</h2>
         <button class="plan-collapse" data-showpanel="timeline">▾ ซ่อน</button>
       </div>
-      <div class="panel-note">รายการ Item ถูกซ่อนอยู่ ไทม์ไลน์ของทุกใบจึงมารวมกันที่นี่ — เปิด “รายการ Item” กลับมา แล้วไทม์ไลน์จะกลับไปอยู่ใต้ตารางขั้นตอนของแต่ละใบ · แกนนอนนับเฉพาะ<b>เวลาทำงาน</b> — กลางคืนกับวันอาทิตย์ถูกตัดออก ความยาวแท่งจึงเทียบกันได้ตรงๆ (วันละ ${fmtNum(plan.hpd,0)} ชม. เริ่มกะ ${escapeHtml(planState.shiftStart)}) · ตำแหน่งและความยาวอิงเวลาเริ่ม-จบจริงของแต่ละขั้นตอน รวมเวลาที่แก้เองในตาราง (ขยับตามที่แก้ทันที) ส่วนขั้นตอนแยกวาดจากจุดเริ่มของ Item นั้นแบบประมาณการเท่านั้น${plan.anyDue ? ' · <b>เส้นประแนวตั้ง</b>คือกำหนดเสร็จของ Item นั้น — แท่งที่จบก่อนเส้น (เส้นเขียว) คือเสร็จก่อนกำหนด ถ้าเลยเส้นไป (เส้นแดง) คือทำไม่ทัน' : ' · กรอก “กำหนดเสร็จ” ด้านบนเพื่อให้ขึ้นเส้นชี้บ่งกำหนดส่งบนไทม์ไลน์'}</div>
+      <div class="panel-note">รายการ Item ถูกซ่อนอยู่ ไทม์ไลน์ของทุกใบจึงมารวมกันที่นี่ — เปิด “รายการ Item” กลับมา แล้วไทม์ไลน์จะกลับไปอยู่ใต้ตารางขั้นตอนของแต่ละใบ · แกนนอนนับเฉพาะ<b>เวลาทำงาน</b> — กลางคืน วันอาทิตย์ และช่วงพักถูกตัดออก ความยาวแท่งจึงเทียบกันได้ตรงๆ (${escapeHtml(planShiftSummaryText())}) · ตำแหน่งและความยาวอิงเวลาเริ่ม-จบจริงของแต่ละขั้นตอน รวมเวลาที่แก้เองในตาราง (ขยับตามที่แก้ทันที) ส่วนขั้นตอนแยกวาดจากจุดเริ่มของ Item นั้นแบบประมาณการเท่านั้น${plan.anyDue ? ' · <b>เส้นประแนวตั้ง</b>คือกำหนดเสร็จของ Item นั้น — แท่งที่จบก่อนเส้น (เส้นเขียว) คือเสร็จก่อนกำหนด ถ้าเลยเส้นไป (เส้นแดง) คือทำไม่ทัน' : ' · กรอก “กำหนดเสร็จ” ด้านบนเพื่อให้ขึ้นเส้นชี้บ่งกำหนดส่งบนไทม์ไลน์'}</div>
       <div class="plan-timeline" style="--tl-grid:${tlGridPct}%;">
         ${tlAxisHtml}
         ${plan.jobs.map((jp,i)=>{
@@ -3967,7 +4100,7 @@ function renderPlanner(){
         ${extraNote}
         <li><b>อัตราการผลิต</b> — ค่ามัธยฐานของเป้าหมายที่บันทึกไว้ (ชิ้น/ชม.) หรืออัตราจริง = ผลิตได้จริงรวม ÷ ชั่วโมงเครื่องจักรรวม ตามฐานที่เลือกด้านบน</li>
         <li><b>เวลา</b> — ชั่วโมง = จำนวนชิ้น ÷ (อัตรา × จำนวนสถานี) นับเฉพาะเวลาเดินเครื่อง ไม่รวมเวลาตั้งเครื่อง รอของ หรือขนย้ายระหว่างขั้นตอน</li>
-        <li><b>วันที่และเวลา</b> — แปลงจากชั่วโมงด้วยชั่วโมงทำงาน/วันและเวลาเริ่มกะที่กรอก ข้ามวันอาทิตย์ตามปฏิทินโรงงาน แก้เวลาเริ่มของขั้นตอนไหนเองได้ในช่อง “ช่วงวันที่” ของตาราง เพื่อให้สอดคล้องกับความเป็นจริง (เช่น เริ่มช้ากว่าที่คำนวณไว้) ขั้นตอนถัดไปจะคำนวณต่อจากเวลานั้นให้อัตโนมัติ — กดปุ่ม ✕ เพื่อล้างค่าที่แก้เองแล้วกลับไปคำนวณต่อเนื่องตามปกติ</li>
+        <li><b>วันที่และเวลา</b> — เดินตามตารางกะที่กรอกไว้ (${escapeHtml(planShiftSummaryText())}) <b>ช่วงพักถูกตัดออกจากเวลาทำงาน แต่ยังกินเวลานาฬิกา</b> งานที่คร่อมช่วงพักจึงจบช้ากว่าชั่วโมงเดินเครื่องตามจริง · ข้ามวันอาทิตย์ตามปฏิทินโรงงาน แก้เวลาเริ่มของขั้นตอนไหนเองได้ในช่อง “ช่วงวันที่” ของตาราง เพื่อให้สอดคล้องกับความเป็นจริง (เช่น เริ่มช้ากว่าที่คำนวณไว้) ขั้นตอนถัดไปจะคำนวณต่อจากเวลานั้นให้อัตโนมัติ — กดปุ่ม ✕ เพื่อล้างค่าที่แก้เองแล้วกลับไปคำนวณต่อเนื่องตามปกติ</li>
         <li><b>ของเสีย</b> — เผื่อเป็น % เท่ากันทุกขั้นตอนตามที่กรอก ไล่ย้อนจากขั้นสุดท้ายของแต่ละชิ้นส่วนขึ้นไป (ต้นสายของชิ้นส่วนนั้นจึงต้องขึ้นงานมากกว่าปลายสาย) แต่ละชิ้นส่วนคำนวณแยกจากกัน ถ้าพิมพ์จำนวน “ต้องทำ” เองที่ขั้นตอนไหน จะยึดค่านั้นแล้วไล่ย้อนต่อจากค่านั้นขึ้นไปเฉพาะชิ้นส่วนนั้น</li>
         <li><b>ชื่อวัตถุดิบ</b> — Item เดียวกันอาจมีได้หลายชื่อวัตถุดิบ (หลายชิ้นส่วน) ต่อหน่วยงาน ระบบจะแยกเป็นคนละแถวให้ครบทุกชื่อที่เจอในข้อมูลย้อนหลัง ชี้ที่ชื่อเพื่อดูชื่อเต็ม</li>
         ${warnHtml}
@@ -4023,6 +4156,23 @@ function refreshPlanner(){
   renderPlanner();
 }
 
+/** เขียนค่าตารางกะลงช่องกรอกและอัปเดตบรรทัดสรุปใต้ช่อง "ช่วงพัก" */
+function planRenderShiftInputs(){
+  const start = document.getElementById('planShiftStart');
+  const end = document.getElementById('planShiftEnd');
+  const brk = document.getElementById('planBreaks');
+  const note = document.getElementById('planShiftNote');
+  if(!start || !end || !brk || !note) return;
+  start.value = planState.shiftStart;
+  end.value = planState.shiftEnd;
+  brk.value = planBreaksText();
+  const bad = planTimeToMinutes(planState.shiftEnd) <= planTimeToMinutes(planState.shiftStart);
+  note.className = 'plan-shift-note' + (bad ? ' bad' : '');
+  note.textContent = bad
+    ? 'เวลาเลิกงานต้องอยู่หลังเวลาเริ่มกะ — ตอนนี้ใช้ ' + planShiftSummaryText() + ' ไปก่อน'
+    : planShiftSummaryText();
+}
+
 (function initPlannerControls(){
   const start = document.getElementById('planStartDate');
   planState.startIso = planTodayIso();
@@ -4035,7 +4185,6 @@ function refreshPlanner(){
       renderPlanner();
     });
   };
-  num('planHoursPerDay', 'hoursPerDay', 0.5, 24);
   num('planScrap', 'scrapPct', 0, 90);
   num('planWipHours', 'wipHours', 0, 24);
 
@@ -4051,11 +4200,23 @@ function refreshPlanner(){
     renderPlanner();
   });
   const shiftStart = document.getElementById('planShiftStart');
-  shiftStart.value = planState.shiftStart;
+  const shiftEnd = document.getElementById('planShiftEnd');
+  const breaksInput = document.getElementById('planBreaks');
+  const applyShift = ()=>{ planSyncHoursPerDay(); planRenderShiftInputs(); renderPlanner(); };
   shiftStart.addEventListener('change', (e)=>{
     planState.shiftStart = e.target.value || '08:00';
-    renderPlanner();
+    applyShift();
   });
+  shiftEnd.addEventListener('change', (e)=>{
+    planState.shiftEnd = e.target.value || PLAN_DEFAULT_SHIFT_END;
+    applyShift();
+  });
+  // จัดข้อความให้เป็นรูปแบบเดียวกันตอนออกจากช่อง ไม่ใช่ระหว่างพิมพ์ (ไม่งั้นเคอร์เซอร์กระโดด)
+  breaksInput.addEventListener('change', (e)=>{
+    planState.breaks = planParseBreaks(e.target.value);
+    applyShift();
+  });
+  planRenderShiftInputs();
   document.getElementById('planRateBasis').addEventListener('change', (e)=>{
     planState.rateBasis = e.target.value;
     renderPlanner();
