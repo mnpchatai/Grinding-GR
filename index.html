@@ -7,9 +7,14 @@
 (function(){
   try{
     var CURRENT_LANG='th';
-    var LANG_FILES={th:'GR_Production_Dashboard.html', tw:'GR_Production_Dashboard_TW.html', mm:'GR_Production_Dashboard_MM.html'};
+    // เพิ่มภาษาที่นี่ได้เมื่อมีไฟล์นั้นอยู่ใน repo จริงเท่านั้น — ถ้าใส่ชื่อไฟล์ที่ยังไม่มี
+    // ผู้ใช้ที่เลือกภาษานั้นค้างไว้จะโดน redirect ไปหน้า 404 ทุกครั้งที่เปิด และกด Back ไม่ได้
+    var LANG_FILES={th:'index.html'};
     var pref = localStorage.getItem('gr_lang');
-    if(pref && LANG_FILES[pref] && pref!==CURRENT_LANG){
+    if(pref && !LANG_FILES[pref]){
+      // ค่าภาษาที่ค้างจากตอนที่ยังมีไฟล์หลายภาษา — ล้างทิ้งไม่ให้ติดหล่ม 404
+      localStorage.removeItem('gr_lang');
+    }else if(pref && pref!==CURRENT_LANG){
       location.replace(LANG_FILES[pref]);
     }
   }catch(e){}
@@ -822,7 +827,7 @@
 <div id="authGate" class="auth-gate">
   <div class="auth-card">
     <div class="lang-switch">
-      <a href="GR_Production_Dashboard.html" class="lang-btn active" onclick="localStorage.setItem('gr_lang','th')">ไทย</a>
+      <a href="./" class="lang-btn active" onclick="localStorage.setItem('gr_lang','th')">ไทย</a>
       <a href="GR_Production_Dashboard_TW.html" class="lang-btn" onclick="localStorage.setItem('gr_lang','tw')">繁體中文</a>
       <a href="GR_Production_Dashboard_MM.html" class="lang-btn" onclick="localStorage.setItem('gr_lang','mm')">မြန်မာ</a>
     </div>
