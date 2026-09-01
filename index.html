@@ -593,7 +593,6 @@
   .plan-src{font-family:var(--mono);font-size:10px;color:var(--text-faint);white-space:nowrap;}
   .plan-src.manual{color:var(--accent);}
   .plan-src.guess{color:var(--warn);}
-  .plan-daterange{min-width:230px;}
   .plan-start-edit{display:flex;align-items:center;gap:5px;margin-top:4px;flex-wrap:nowrap;}
   .plan-start-input{width:190px;min-width:190px;text-align:left;padding:5px 6px;flex:none;}
   .plan-material{font-size:11.5px;color:var(--text-dim);line-height:1.5;max-width:260px;}
@@ -786,6 +785,60 @@
   .plan-job-tl-note{font-size:11.5px;color:var(--text-faint);line-height:1.7;margin-bottom:12px;}
   .plan-job-tl .plan-tl-legend{margin-top:10px;}
 
+  /* แบ่งใบ Item ออกเป็นสองฝั่งเท่ากัน — ซ้ายคือ "ทำอะไร" (ลำดับ/หน่วยงาน/วัตถุดิบ/คน/อัตรา/สถานี/จำนวน)
+     ขวาคือ "ทำเมื่อไร" (แท่งไทม์ไลน์ พร้อมชั่วโมง วัน ช่วงวันที่ และช่องแก้เวลาเริ่มของขั้นตอนนั้น)
+     ตัวเลขเวลาย้ายไปอยู่ติดแท่งของตัวเอง ตารางฝั่งซ้ายจึงเหลือเฉพาะช่องที่กรอก/แก้ได้ และพอดีครึ่งจอ */
+  .plan-job-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start;}
+  .plan-job-split.one{grid-template-columns:minmax(0,1fr);}
+  .plan-job-left,.plan-job-right{min-width:0;}
+  /* ตารางฝั่งซ้ายต้องพอดีครึ่งใบโดยไม่ต้องเลื่อนซ้าย-ขวา — ปล่อยให้หัวตารางขึ้นบรรทัดใหม่ได้
+     แล้วบีบระยะขอบกับความกว้างช่องกรอกลง (คอลัมน์เวลาย้ายไปฝั่งขวาแล้ว จึงเหลือที่ให้พอดี) */
+  .plan-job-left .plan-step-table{min-width:0;}
+  .plan-job-left .plan-step-table thead th{white-space:normal;padding:9px 7px;line-height:1.45;}
+  .plan-job-left .plan-step-table tbody td{padding:8px 7px;}
+  /* ชื่อวัตถุดิบยาวเกินช่องก็ตัดด้วย … แล้วอ่านเต็มๆ ได้จาก tooltip เหมือนเดิม */
+  .plan-job-left .plan-material{max-width:112px;overflow:hidden;text-overflow:ellipsis;}
+  /* บรรทัดกำกับเล็กๆ ใต้ช่อง (ที่มาของอัตรา / ที่มาของลำดับ) ขึ้นบรรทัดใหม่ได้ ไม่งั้นดันคอลัมน์กว้างเกินครึ่งใบ */
+  .plan-job-left .plan-src{white-space:normal;}
+  .plan-job-left .plan-cell-input{width:54px;}
+  /* ยอด "ต้องทำ" เป็นเลขหลักหมื่น ช่องเท่าคอลัมน์อื่นจะโดนตัดท้าย */
+  .plan-job-left .plan-cell-input[data-field="qty"]{width:78px;}
+  .plan-job-left .plan-src.plan-rank{white-space:nowrap;}
+  .plan-job-left .plan-owner-input{width:92px;}
+  .plan-job-left select.plan-owner-input{width:118px;}
+  .plan-job-left .plan-seq{gap:3px;}
+  .plan-job-left .plan-move{padding:3px 3px;}
+  .plan-job-left .plan-move.plan-del{padding:3px 5px;}
+  .plan-job-right .plan-job-tl{
+    margin-top:0;padding-top:0;border-top:none;
+    padding-left:20px;border-left:1px dashed var(--border);
+  }
+  .plan-job-right .plan-tl-row{grid-template-columns:118px minmax(0,1fr);}
+  /* แถวไทม์ไลน์ที่มีตัวเลขเวลาห้อยใต้แท่ง — ชื่อหน่วยงานชิดบนให้ตรงกับแท่ง ไม่ลอยไปกลางบล็อก */
+  .plan-tl-row.detail{align-items:start;}
+  .plan-tl-row.detail .plan-tl-name{padding-top:4px;}
+  .plan-tl-main{display:flex;flex-direction:column;gap:5px;min-width:0;}
+  .plan-tl-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;font-size:11px;color:var(--text-dim);}
+  .plan-tl-meta .mono{font-family:var(--mono);}
+  .plan-tl-meta b{color:var(--text);font-family:var(--mono);font-weight:600;}
+  .plan-tl-meta .plan-start-edit{margin-top:0;}
+  .plan-job-tl-total{
+    display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:12px;padding-top:10px;
+    border-top:1px solid var(--border);font-size:11.5px;color:var(--text-dim);
+  }
+  .plan-job-tl-total b{color:var(--text);font-family:var(--mono);}
+  .plan-job-tl-total .mono{font-family:var(--mono);}
+  .plan-tot .mono,.plan-tot b{font-family:var(--mono);}
+  /* จอที่ไม่กว้างพอจะวางสองฝั่งเคียงกัน — สลับกลับเป็นตารางบน ไทม์ไลน์ล่าง เหมือนเดิม */
+  @media(max-width:1200px){
+    .plan-job-split{grid-template-columns:minmax(0,1fr);}
+    .plan-job-right .plan-job-tl{
+      margin-top:18px;padding-top:14px;border-top:1px dashed var(--border);
+      padding-left:0;border-left:none;
+    }
+    .plan-job-right .plan-tl-row{grid-template-columns:180px minmax(0,1fr);}
+  }
+
   /* ตารางคนในไลน์ */
   .plan-people{margin-top:18px;}
   .plan-people h3{
@@ -844,7 +897,7 @@
     .plan-row-hint{grid-column:1 / -1;}
     .search-box{min-width:0;}
     /* ชื่อหน่วยงาน 180px กินพื้นที่เกือบหมดจอมือถือ จนแท่งไทม์ไลน์แทบไม่เหลือที่ */
-    .plan-tl-row{grid-template-columns:88px 1fr;gap:6px;}
+    .plan-tl-row,.plan-job-right .plan-tl-row{grid-template-columns:88px minmax(0,1fr);gap:6px;}
     .plan-tl-legend{gap:8px;flex-direction:column;}
   }
 </style>
@@ -3052,6 +3105,8 @@ const PLAN_RATE_SRC_LABEL = {
   manual: 'แก้เอง'
 };
 const PLAN_RANK_LABEL = {standard:'· ลำดับมาตรฐาน', standalone:'· ขั้นตอนแยก', manual:'· เพิ่มเอง'};
+// คำสั้นสำหรับบรรทัดกำกับใต้ชื่อขั้นตอนในตารางครึ่งใบ (คำเต็มอยู่ใน tooltip ของบรรทัดนั้น)
+const PLAN_RANK_SHORT = {standard:'มาตรฐาน', standalone:'ขั้นตอนแยก', manual:'เพิ่มเอง'};
 /** อัตรา (ชิ้น/ชม.) แบบอ่านง่าย — ตัดทศนิยมที่ไม่จำเป็นทิ้ง เช่น 3 / 3.5 / 12.75 */
 function planFmtRate(n){
   if(n === null || n === undefined || isNaN(n)) return '—';
@@ -3710,21 +3765,26 @@ function renderPlanner(){
       <div class="sub ${k.cls}">${k.sub}</div>
     </div>`).join('') + `</div>`;
 
+  /** บอกว่าเวลาเริ่มของขั้นตอนนี้ถูกอะไรกำหนด — รอของจากหน่วยก่อนหน้า หรือรอคิวคน/หน่วยงานที่รับผิดชอบ
+   *  เดิมอยู่ในช่อง "ช่วงวันที่" ของตาราง ตอนนี้ตัวเลขเวลาย้ายไปฝั่งไทม์ไลน์ คำอธิบายจึงตามไปด้วย */
+  const stepFlowNote = (r)=>{
+    if(!(plan.overlap && r.start_dt && !r.start_override)) return '';
+    let note = '';
+    if(r.wait_resource) note = 'รอคิว ' + (r.owner || r.step.dept);
+    else if(r.wait_qty >= 1 && r.prev_dept) note = 'เริ่มเมื่อ ' + r.prev_dept + ' ทำได้ ' + fmtNum(Math.round(r.wait_qty)) + ' ชิ้น';
+    else if(r.prev_dept) note = 'เริ่มพร้อม ' + r.prev_dept;
+    if(r.starved) note += (note ? ' · ' : '') + 'รอของระหว่างทำ';
+    return note;
+  };
+
   // แถวของสายหลักและขั้นตอนแยกเลื่อนลำดับได้ทั้งคู่ — แต่ละกลุ่มเลื่อนสลับได้เฉพาะภายในกลุ่มตัวเอง
+  // ฝั่งซ้ายเหลือเฉพาะข้อมูลของงาน (ทำอะไร ใครทำ เท่าไร) ส่วนตัวเลขเวลาอยู่กับแท่งไทม์ไลน์ฝั่งขวา
   const rowHtml = (r, job, no, lastNo, kind)=>{
     const c = getDeptColor(r.step.dept);
     const dept = escapeHtml(r.step.dept).replace(/"/g,'&quot;');
     const stepKey = escapeHtml(r.step.key).replace(/"/g,'&quot;');
     const material = cleanMaterialDisplay(r.step.material || '');
     const srcLabel = r.rate_src ? (PLAN_RATE_SRC_LABEL[r.rate_src] || '') : 'ไม่มีข้อมูล';
-    // บอกว่าเวลาเริ่มของแถวนี้ถูกอะไรกำหนด — รอของจากหน่วยก่อนหน้า หรือรอคิวคน/หน่วยงานที่รับผิดชอบ
-    let flowNote = '';
-    if(plan.overlap && r.start_dt && !r.start_override){
-      if(r.wait_resource) flowNote = 'รอคิว ' + (r.owner || r.step.dept);
-      else if(r.wait_qty >= 1 && r.prev_dept) flowNote = 'เริ่มเมื่อ ' + r.prev_dept + ' ทำได้ ' + fmtNum(Math.round(r.wait_qty)) + ' ชิ้น';
-      else if(r.prev_dept) flowNote = 'เริ่มพร้อม ' + r.prev_dept;
-      if(r.starved) flowNote += (flowNote ? ' · ' : '') + 'รอของระหว่างทำ';
-    }
     const seq = no
       ? `<span class="plan-seq-no">${no}</span>
           <button class="plan-move" data-move="up" data-movekind="${kind}" data-job="${job.uid}" data-idx="${no-1}" title="เลื่อนขึ้น" ${no===1?'disabled':''}>▲</button>
@@ -3732,7 +3792,7 @@ function renderPlanner(){
       : `<span class="plan-seq-no">—</span>`;
     return `<tr>
       <td><div class="plan-seq">${seq}</div></td>
-      <td><span class="prod-dept-pill" style="background:${c.bg};color:${c.text};border-color:${c.border};">${escapeHtml((r.step.dept))}</span>${STEP_OPTIONAL[r.step.dept] ? '<div class="plan-src">เฉพาะบอลบางไซส์</div>' : ''}${r.step.rank_src === 'manual' ? `<button class="plan-move plan-del plan-del-step" data-delstep="${dept}" data-job="${job.uid}" title="ลบขั้นตอนที่เพิ่มเอง">✕</button>` : ''}</td>
+      <td><span class="prod-dept-pill" style="background:${c.bg};color:${c.text};border-color:${c.border};">${escapeHtml((r.step.dept))}</span>${STEP_OPTIONAL[r.step.dept] ? '<div class="plan-src">เฉพาะบอลบางไซส์</div>' : ''}${r.step.rank_src === 'manual' ? `<button class="plan-move plan-del plan-del-step" data-delstep="${dept}" data-job="${job.uid}" title="ลบขั้นตอนที่เพิ่มเอง">✕</button>` : ''}<div class="plan-src plan-rank ${r.step.rank_src === 'standard' ? '' : 'guess'}" title="${escapeHtml((PLAN_RANK_LABEL[r.step.rank_src] || '').replace('· ',''))} · อ้างอิงจากข้อมูลย้อนหลัง ${fmtNum(r.step.n)} รายการ">${PLAN_RANK_SHORT[r.step.rank_src] || ''} · ${fmtNum(r.step.n)} รก.</div></td>
       <td><div class="plan-material" title="${escapeHtml(material).replace(/"/g,'&quot;')}">${material ? escapeHtml(planShortMaterial(material)) : '—'}</div></td>
       <td>
         ${ownerPicker(r, job, stepKey)}
@@ -3749,17 +3809,6 @@ function renderPlanner(){
         <input class="plan-cell-input${r.qty_manual ? ' manual' : ''}" type="number" min="0" step="1" data-field="qty" data-job="${job.uid}" data-key="${stepKey}" value="${Math.round(r.qty_in)}">
         ${r.qty_manual ? '<div class="plan-src manual">แก้เอง</div>' : ''}
       </td>
-      <td class="num mono">${r.hours != null ? fmtHM(r.hours) : '—'}</td>
-      <td class="num mono">${r.days != null ? fmtNum(r.days,2) : '—'}</td>
-      <td class="mono plan-daterange">
-        <div>${r.start_dt ? planFmtDateTime(r.start_dt) + ' → ' + planFmtDateTime(r.end_dt) : '—'}</div>
-        ${flowNote ? `<div class="plan-src">${escapeHtml(flowNote)}</div>` : ''}
-        ${r.start_dt ? `<div class="plan-start-edit">
-          <input class="plan-cell-input plan-start-input" type="datetime-local" data-field="startAt" data-job="${job.uid}" data-key="${stepKey}" value="${planFmtDateTimeLocal(r.start_dt)}" title="แก้เวลาเริ่มขั้นตอนนี้ให้สอดคล้องกับความเป็นจริง">
-          ${r.start_override ? `<button class="plan-move plan-del" data-clearstart="${stepKey}" data-job="${job.uid}" title="ล้างเวลาที่แก้เอง กลับไปคำนวณอัตโนมัติ">✕</button>` : ''}
-        </div>${r.start_override ? '<div class="plan-src manual">แก้เอง</div>' : ''}` : ''}
-      </td>
-      <td class="num mono">${fmtNum(r.step.n)}<div class="plan-src ${r.step.rank_src === 'standard' ? '' : 'guess'}">${PLAN_RANK_LABEL[r.step.rank_src] || ''}</div></td>
     </tr>`;
   };
 
@@ -3787,27 +3836,25 @@ function renderPlanner(){
     </select>`;
   };
 
+  /** ข้อความยอดรวมของ Item หนึ่งใบ ใช้ได้ทั้งท้ายไทม์ไลน์ฝั่งขวาและแถวรวมท้ายตารางฝั่งซ้าย */
+  const jobTotalParts = (jp)=>{
+    const range = jp.start_dt ? `<span class="mono">${planFmtDateTime(jp.start_dt)} → ${planFmtDateTime(jp.end_dt)}</span>` : '';
+    const parts = [];
+    if(jp.extra.length) parts.push(`รวมเฉพาะสายหลัก <b>${fmtHM(jp.mainHours)}</b> ชม. · <b>${fmtNum(jp.mainDays,2)}</b> วัน${range ? ' · ' + range : ''}`);
+    parts.push(`รวม Item นี้ <b>${fmtHM(jp.totalHours)}</b> ชม. · <b>${fmtNum(jp.totalDays,2)}</b> วัน${(!jp.extra.length && range) ? ' · ' + range : ''}`);
+    return parts;
+  };
+
   const jobHtml = (jp, i)=>{
     const job = jp.job;
     const mainBody = jp.main.map((r,k)=> rowHtml(r, job, k+1, jp.main.length, 'main')).join('');
     const extraBody = jp.extra.length
-      ? `<tr class="plan-sep"><td colspan="11">ขั้นตอนแยก — ไม่ได้อยู่ในลำดับสายหลัก จึงไม่ผูกวันที่และไม่นับรวมในวันที่เสร็จ (เลื่อนขึ้น/ลงได้เพื่อจัดลำดับที่แสดง)</td></tr>` + jp.extra.map((r,k)=> rowHtml(r, job, k+1, jp.extra.length, 'extra')).join('')
+      ? `<tr class="plan-sep"><td colspan="7">ขั้นตอนแยก — ไม่ได้อยู่ในลำดับสายหลัก จึงไม่ผูกวันที่และไม่นับรวมในวันที่เสร็จ (เลื่อนขึ้น/ลงได้เพื่อจัดลำดับที่แสดง)</td></tr>` + jp.extra.map((r,k)=> rowHtml(r, job, k+1, jp.extra.length, 'extra')).join('')
       : '';
-    const totalRows = (jp.extra.length ? `
-            <tr class="plan-tot">
-              <td colspan="7">รวมเฉพาะสายหลัก</td>
-              <td class="num mono">${fmtHM(jp.mainHours)}</td>
-              <td class="num mono">${fmtNum(jp.mainDays,2)}</td>
-              <td class="mono">${jp.start_dt ? planFmtDateTime(jp.start_dt) + ' → ' + planFmtDateTime(jp.end_dt) : '—'}</td>
-              <td></td>
-            </tr>` : '') + `
-            <tr class="plan-tot">
-              <td colspan="7">รวม Item นี้</td>
-              <td class="num mono">${fmtHM(jp.totalHours)}</td>
-              <td class="num mono">${fmtNum(jp.totalDays,2)}</td>
-              <td class="mono">${jp.extra.length ? '—' : (jp.start_dt ? planFmtDateTime(jp.start_dt) + ' → ' + planFmtDateTime(jp.end_dt) : '—')}</td>
-              <td></td>
-            </tr>`;
+    // ไทม์ไลน์ของใบนี้เป็นเนื้อหาฝั่งขวาทั้งฝั่ง — ถ้าไม่มี (ปิดไว้ / ยังไม่มีวันที่) ก็แสดงตารางเต็มความกว้างแทน
+    const tlHtml = jobTimelineHtml(jp);
+    const totalRows = tlHtml ? '' : jobTotalParts(jp).map(t=> `
+            <tr class="plan-tot"><td colspan="7">${t}</td></tr>`).join('');
     const noSteps = !jp.main.length && !jp.extra.length;
     const usedDepts = new Set(job.steps.map(s=> s.dept));
     const deptChoices = planDeptOptions().filter(d=> !usedDepts.has(d));
@@ -3836,6 +3883,8 @@ function renderPlanner(){
         </div>
       </div>
       <div class="plan-job-body">
+      <div class="plan-job-split${tlHtml ? '' : ' one'}">
+        <div class="plan-job-left">
       ${noSteps ? `<div class="plan-empty">Item นี้ยังไม่มีบรรทัดที่ระบุหน่วยงานในข้อมูลย้อนหลัง — เพิ่มขั้นตอนเองด้านล่างแล้วกรอกอัตราประมาณการ ก็คำนวณรวมกับ Item อื่นในแผนนี้ได้เลย โดยไม่ต้องรอข้อมูลจริงในชีต</div>` : `
       <div class="table-wrap">
         <table class="plan-step-table">
@@ -3848,10 +3897,6 @@ function renderPlanner(){
               <th class="num">อัตรา (ชิ้น/ชม.)</th>
               <th class="num">สถานีที่ทำขนาน</th>
               <th class="num">ต้องทำ (ชิ้น)</th>
-              <th class="num">ชั่วโมง</th>
-              <th class="num">วัน</th>
-              <th>ช่วงวันที่</th>
-              <th class="num">อ้างอิง (รายการ)</th>
             </tr>
           </thead>
           <tbody>${mainBody}${extraBody}${totalRows}
@@ -3859,7 +3904,9 @@ function renderPlanner(){
         </table>
       </div>`}
       ${manualAddHtml}
-      ${jobTimelineHtml(jp)}
+        </div>
+        ${tlHtml ? `<div class="plan-job-right">${tlHtml}</div>` : ''}
+      </div>
       </div>
     </div>`;
   };
@@ -3937,10 +3984,31 @@ function renderPlanner(){
   const tlSpanOf = (r)=> (r.tl_start && r.tl_end) ? Math.max(tlWorkAt(r.tl_end) - tlWorkAt(r.tl_start), 0) : 0;
   const tlIntermittent = (r)=> !!(r.tl_start && r.tl_end) && r.hours != null && (tlSpanOf(r) - r.hours) > 0.05;
 
-  const tlRow = (r, standalone, dueMark)=>{
+  /** ตัวเลขเวลาของขั้นตอนหนึ่ง ห้อยอยู่ใต้แท่งของตัวเอง — ชั่วโมง วัน ช่วงวันที่ และช่องแก้เวลาเริ่ม
+   *  ย้ายมาจากตารางฝั่งซ้าย จะได้อ่าน "ทำเมื่อไร กี่ชั่วโมง" คู่กับแท่ง และแก้เวลาได้จากจุดเดียวกัน
+   *  ใส่เฉพาะไทม์ไลน์ที่อยู่ในใบของ Item (ส่งค่า job มาด้วย) ส่วนแผงรวมทุก Item ยังเป็นแท่งล้วนเหมือนเดิม */
+  const tlMeta = (r, job)=>{
+    if(!job) return '';
+    const stepKey = escapeHtml(r.step.key).replace(/"/g,'&quot;');
+    const flowNote = stepFlowNote(r);
+    return `<div class="plan-tl-meta">
+      <span><b>${r.hours != null ? fmtHM(r.hours) : '—'}</b> ชม.</span>
+      <span><b>${r.days != null ? fmtNum(r.days,2) : '—'}</b> วัน</span>
+      <span class="mono">${r.start_dt ? planFmtDateTime(r.start_dt) + ' → ' + planFmtDateTime(r.end_dt) : 'ไม่ผูกวันที่'}</span>
+      ${flowNote ? `<span class="plan-src">${escapeHtml(flowNote)}</span>` : ''}
+      ${r.start_dt ? `<span class="plan-start-edit">
+        <input class="plan-cell-input plan-start-input" type="datetime-local" data-field="startAt" data-job="${job.uid}" data-key="${stepKey}" value="${planFmtDateTimeLocal(r.start_dt)}" title="แก้เวลาเริ่มขั้นตอนนี้ให้สอดคล้องกับความเป็นจริง">
+        ${r.start_override ? `<button class="plan-move plan-del" data-clearstart="${stepKey}" data-job="${job.uid}" title="ล้างเวลาที่แก้เอง กลับไปคำนวณอัตโนมัติ">✕</button>` : ''}
+      </span>${r.start_override ? '<span class="plan-src manual">แก้เอง</span>' : ''}` : ''}
+    </div>`;
+  };
+
+  const tlRow = (r, standalone, dueMark, job)=>{
     const c = getDeptColor(r.step.dept);
     const name = escapeHtml(r.step.dept) + (r.owner ? ` <span class="plan-src">· ${escapeHtml(r.owner)}</span>` : '');
-    if(!r.tl_start || !r.tl_end) return `<div class="plan-tl-row"><div class="plan-tl-name">${name}</div><div class="plan-tl-track">${dueMark || ''}</div></div>`;
+    const meta = tlMeta(r, job);
+    const detail = meta ? ' detail' : '';
+    if(!r.tl_start || !r.tl_end) return `<div class="plan-tl-row${detail}"><div class="plan-tl-name">${name}</div><div class="plan-tl-main"><div class="plan-tl-track">${dueMark || ''}</div>${meta}</div></div>`;
     const left = (tlWorkAt(r.tl_start)/tlSpanHours)*100;
     const spanHours = tlSpanOf(r);
     const width = Math.max((spanHours/tlSpanHours)*100, 0.5);
@@ -3958,12 +4026,15 @@ function renderPlanner(){
     // ป้ายวางนอกแท่ง แท่งสั้นๆ จึงยังอ่านออก (เดิมป้ายอยู่ในแท่งแล้วถูกตัดจนเหลือตัวเดียว)
     // ท้ายแกนไม่มีที่ว่างก็พลิกไปไว้หน้าแท่ง ถ้าแท่งยาวจนไม่เหลือที่ทั้งสองข้างค่อยวางในแท่ง
     const labelPos = (left + width <= 74) ? 'after' : (left >= 26 ? 'before' : 'inside');
-    return `<div class="plan-tl-row">
+    return `<div class="plan-tl-row${detail}">
       <div class="plan-tl-name">${name}</div>
-      <div class="plan-tl-track" title="${escapeHtml(tip).replace(/"/g,'&quot;')}">
-        <div class="plan-tl-bar${standalone ? ' standalone' : ''}${intermittent ? ' intermittent' : ''}" style="left:${left}%;width:${width}%;background-color:${c.border};"></div>
-        ${dueMark || ''}
-        <span class="plan-tl-label ${labelPos}${standalone ? ' standalone' : ''}" style="left:${labelPos === 'after' ? left + width : left}%;color:${c.text};">${label}</span>
+      <div class="plan-tl-main">
+        <div class="plan-tl-track" title="${escapeHtml(tip).replace(/"/g,'&quot;')}">
+          <div class="plan-tl-bar${standalone ? ' standalone' : ''}${intermittent ? ' intermittent' : ''}" style="left:${left}%;width:${width}%;background-color:${c.border};"></div>
+          ${dueMark || ''}
+          <span class="plan-tl-label ${labelPos}${standalone ? ' standalone' : ''}" style="left:${labelPos === 'after' ? left + width : left}%;color:${c.text};">${label}</span>
+        </div>
+        ${meta}
       </div>
     </div>`;
   };
@@ -3983,12 +4054,13 @@ function renderPlanner(){
     ].filter(Boolean).join('');
     return `<div class="plan-job-tl">
       <h3>ไทม์ไลน์ของ Item นี้</h3>
-      <div class="plan-job-tl-note">แกนนอนนับเฉพาะ<b>เวลาทำงาน</b> — กลางคืน วันอาทิตย์ และช่วงพักถูกตัดออก ความยาวแท่งจึงเทียบกันได้ตรงๆ (${escapeHtml(planShiftSummaryText())}) · ตำแหน่งและความยาวอิงเวลาเริ่ม-จบจริงของแต่ละขั้นตอน รวมเวลาที่แก้เองในตารางด้านบน (ขยับตามที่แก้ทันที) · ทุก Item ใช้แกนเดียวกันทั้งแผน จึงเทียบข้ามใบได้ว่าใบไหนกินช่วงไหน${jp.dueDt ? ' · <b>เส้นประแนวตั้ง</b>คือกำหนดเสร็จของ Item นี้' : ''}</div>
+      <div class="plan-job-tl-note">แกนนอนนับเฉพาะ<b>เวลาทำงาน</b> — กลางคืน วันอาทิตย์ และช่วงพักถูกตัดออก ความยาวแท่งจึงเทียบกันได้ตรงๆ (${escapeHtml(planShiftSummaryText())}) · ตัวเลข<b>ชั่วโมง วัน และช่วงวันที่</b>ของแต่ละขั้นตอนอยู่ใต้แท่งของตัวเอง แก้<b>เวลาเริ่ม</b>ได้จากช่องตรงนั้นเลย แล้วแท่งจะขยับตามทันที · ทุก Item ใช้แกนเดียวกันทั้งแผน จึงเทียบข้ามใบได้ว่าใบไหนกินช่วงไหน${jp.dueDt ? ' · <b>เส้นประแนวตั้ง</b>คือกำหนดเสร็จของ Item นี้' : ''}</div>
       <div class="plan-timeline" style="--tl-grid:${tlGridPct}%;">
         ${tlAxisHtml}
-        ${jp.main.map(r=> tlRow(r, false, dueMark)).join('')}
-        ${jp.extra.length ? `<div class="plan-tl-sep">ขั้นตอนแยก — ทำเมื่อไรก็ได้ ไม่ได้ต่อจากขั้นตอนใด จึงวาดจากจุดเริ่มของ Item นี้</div>` + jp.extra.map(r=> tlRow(r, true, dueMark)).join('') : ''}
+        ${jp.main.map(r=> tlRow(r, false, dueMark, jp.job)).join('')}
+        ${jp.extra.length ? `<div class="plan-tl-sep">ขั้นตอนแยก — ทำเมื่อไรก็ได้ ไม่ได้ต่อจากขั้นตอนใด จึงวาดจากจุดเริ่มของ Item นี้</div>` + jp.extra.map(r=> tlRow(r, true, dueMark, jp.job)).join('') : ''}
       </div>
+      <div class="plan-job-tl-total">${jobTotalParts(jp).map(t=> `<span>${t}</span>`).join('')}</div>
       <div class="plan-tl-legend">${legend}</div>
     </div>`;
   };
@@ -4101,7 +4173,7 @@ function renderPlanner(){
         <h2>ไทม์ไลน์โดยประมาณ (ทุก Item)</h2>
         <button class="plan-collapse" data-showpanel="timeline">▾ ซ่อน</button>
       </div>
-      <div class="panel-note">รายการ Item ถูกซ่อนอยู่ ไทม์ไลน์ของทุกใบจึงมารวมกันที่นี่ — เปิด “รายการ Item” กลับมา แล้วไทม์ไลน์จะกลับไปอยู่ใต้ตารางขั้นตอนของแต่ละใบ · แกนนอนนับเฉพาะ<b>เวลาทำงาน</b> — กลางคืน วันอาทิตย์ และช่วงพักถูกตัดออก ความยาวแท่งจึงเทียบกันได้ตรงๆ (${escapeHtml(planShiftSummaryText())}) · ตำแหน่งและความยาวอิงเวลาเริ่ม-จบจริงของแต่ละขั้นตอน รวมเวลาที่แก้เองในตาราง (ขยับตามที่แก้ทันที) ส่วนขั้นตอนแยกวาดจากจุดเริ่มของ Item นั้นแบบประมาณการเท่านั้น${plan.anyDue ? ' · <b>เส้นประแนวตั้ง</b>คือกำหนดเสร็จของ Item นั้น — แท่งที่จบก่อนเส้น (เส้นเขียว) คือเสร็จก่อนกำหนด ถ้าเลยเส้นไป (เส้นแดง) คือทำไม่ทัน' : ' · กรอก “กำหนดเสร็จ” ด้านบนเพื่อให้ขึ้นเส้นชี้บ่งกำหนดส่งบนไทม์ไลน์'}</div>
+      <div class="panel-note">รายการ Item ถูกซ่อนอยู่ ไทม์ไลน์ของทุกใบจึงมารวมกันที่นี่ — เปิด “รายการ Item” กลับมา แล้วไทม์ไลน์จะกลับไปอยู่ใต้ตารางขั้นตอนของแต่ละใบ · แกนนอนนับเฉพาะ<b>เวลาทำงาน</b> — กลางคืน วันอาทิตย์ และช่วงพักถูกตัดออก ความยาวแท่งจึงเทียบกันได้ตรงๆ (${escapeHtml(planShiftSummaryText())}) · ตำแหน่งและความยาวอิงเวลาเริ่ม-จบจริงของแต่ละขั้นตอน รวมเวลาที่แก้เองใต้แท่งในใบของแต่ละ Item (ขยับตามที่แก้ทันที) ส่วนขั้นตอนแยกวาดจากจุดเริ่มของ Item นั้นแบบประมาณการเท่านั้น${plan.anyDue ? ' · <b>เส้นประแนวตั้ง</b>คือกำหนดเสร็จของ Item นั้น — แท่งที่จบก่อนเส้น (เส้นเขียว) คือเสร็จก่อนกำหนด ถ้าเลยเส้นไป (เส้นแดง) คือทำไม่ทัน' : ' · กรอก “กำหนดเสร็จ” ด้านบนเพื่อให้ขึ้นเส้นชี้บ่งกำหนดส่งบนไทม์ไลน์'}</div>
       <div class="plan-timeline" style="--tl-grid:${tlGridPct}%;">
         ${tlAxisHtml}
         ${plan.jobs.map((jp,i)=>{
