@@ -1826,6 +1826,10 @@ const STEP_ORDER = ['รีด','ปั๊ม','เปเปอร์','ตั�
 
 // ขั้นตอนที่ไม่ได้ผ่านทุกงาน — ทำเฉพาะบอลบางไซส์
 const STEP_OPTIONAL = {'เจียร์(หยาบ)':true, 'เจียร์(ละเอียด)':true};
+// ขั้นตอนที่ผู้ใช้เพิ่มเองด้วยชื่อนอกลิสต์มาตรฐาน ยังถือเป็นสายหลัก — ให้ลำดับต่อท้ายจากลิสต์มาตรฐาน
+// แล้วเรียงกันเองตามลำดับที่กดเพิ่ม (คนที่พิมพ์ขั้นตอนเองใส่มาตามกระบวนการจริงอยู่แล้ว)
+// เว้นช่วงห่างจาก STEP_ORDER มากๆ ไว้ เผื่อวันหลังมีการเพิ่มขั้นตอนมาตรฐานใหม่
+const PLAN_MANUAL_RANK_BASE = 1000;
 
 /**
  * ตำแหน่งของหน่วยงานในสายหลัก — 1 = ต้นสาย, null = ไม่ได้อยู่ในสายหลัก
@@ -2376,11 +2380,14 @@ function buildPlanSteps(item, userOrder, manualDepts){
 
   // เติมขั้นตอนที่ผู้ใช้เพิ่มเอง — ข้ามหน่วยงานที่มีข้อมูลย้อนหลังจริงอยู่แล้ว (ไม่ว่าจะกี่ชิ้นส่วนก็ตาม)
   // เก็บลำดับที่กดเพิ่มไว้ด้วย (manual_seq) เพื่อให้ขั้นตอนที่เพิ่มเองเรียงตามที่ผู้ใช้ใส่เข้ามา
+  // ชื่อที่ไม่ตรงลิสต์มาตรฐานก็ยังนับเป็นสายหลัก โดยได้ลำดับต่อท้ายตามที่กดเพิ่ม — ไม่งั้น Item ที่พิมพ์
+  // ขั้นตอนเองล้วนจะกลายเป็นขั้นตอนแยกทั้งใบ แล้วไม่มีวันเริ่ม-วันเสร็จและไม่มีแท่งใน "สรุป Lead time"
   const usedDeptsForManual = new Set(steps.map(s=> s.dept));
   (manualDepts || []).forEach((dept, mi)=>{
     if(usedDeptsForManual.has(dept)) return;
     const shell = planManualStepShell(dept);
     shell.manual_seq = mi;
+    if(shell.rank == null) shell.rank = PLAN_MANUAL_RANK_BASE + mi;
     steps.push(shell);
   });
 
@@ -2389,8 +2396,8 @@ function buildPlanSteps(item, userOrder, manualDepts){
   const byRoute = (a,b)=>{
     if((a.rank == null) !== (b.rank == null)) return a.rank == null ? 1 : -1;
     if(a.rank == null){
-      // ขั้นตอนแยกไม่มีลำดับมาตรฐานให้ยึด — ที่เพิ่มเองจึงเรียงตามลำดับที่กดเพิ่ม (เพิ่มก่อนอยู่บน)
-      // แล้วต่อท้ายขั้นตอนแยกที่มาจากข้อมูลย้อนหลัง ถ้าเรียงตามตัวอักษรเหมือนเดิม ลำดับที่ผู้ใช้ตั้งใจใส่จะสลับทันทีที่วาดใหม่
+      // ขั้นตอนแยกที่เหลืออยู่มีแต่หน่วยงานจากข้อมูลย้อนหลังที่ไม่อยู่ในลำดับมาตรฐาน (ที่เพิ่มเองเข้าสายหลักไปแล้ว)
+      // เรียงตามลำดับที่กดเพิ่มก่อนถ้ามี แล้วค่อยเรียงตามตัวอักษร
       const ma = a.manual_seq, mb = b.manual_seq;
       if((ma == null) !== (mb == null)) return ma == null ? -1 : 1;
       if(ma != null) return ma - mb;
@@ -3792,7 +3799,7 @@ function renderPlanner(){
       : `<span class="plan-seq-no">—</span>`;
     return `<tr>
       <td><div class="plan-seq">${seq}</div></td>
-      <td><span class="prod-dept-pill" style="background:${c.bg};color:${c.text};border-color:${c.border};">${escapeHtml((r.step.dept))}</span>${STEP_OPTIONAL[r.step.dept] ? '<div class="plan-src">เฉพาะบอลบางไซส์</div>' : ''}${r.step.rank_src === 'manual' ? `<button class="plan-move plan-del plan-del-step" data-delstep="${dept}" data-job="${job.uid}" title="ลบขั้นตอนที่เพิ่มเอง">✕</button>` : ''}<div class="plan-src plan-rank ${r.step.rank_src === 'standard' ? '' : 'guess'}" title="${escapeHtml((PLAN_RANK_LABEL[r.step.rank_src] || '').replace('· ',''))} · อ้างอิงจากข้อมูลย้อนหลัง ${fmtNum(r.step.n)} รายการ">${PLAN_RANK_SHORT[r.step.rank_src] || ''} · ${fmtNum(r.step.n)} รก.</div></td>
+      <td><span class="prod-dept-pill" style="background:${c.bg};color:${c.text};border-color:${c.border};">${escapeHtml((r.step.dept))}</span>${STEP_OPTIONAL[r.step.dept] ? '<div class="plan-src">เฉพาะบอลบางไซส์</div>' : ''}${r.step.rank_src === 'manual' ? `<button class="plan-move plan-del plan-del-step" data-delstep="${dept}" data-job="${job.uid}" title="ลบขั้นตอนที่เพิ่มเอง">✕</button>` : ''}<div class="plan-src plan-rank ${r.step.rank_src === 'standard' ? '' : 'guess'}" title="${escapeHtml((PLAN_RANK_LABEL[r.step.rank_src] || '').replace('· ',''))}${r.step.n ? ' · อ้างอิงจากข้อมูลย้อนหลัง ' + fmtNum(r.step.n) + ' รายการ' : ' · ไม่มีข้อมูลย้อนหลัง กรอกอัตราเอง'}">${PLAN_RANK_SHORT[r.step.rank_src] || ''}${r.step.n ? ' · ' + fmtNum(r.step.n) + ' รก.' : ''}</div></td>
       <td><div class="plan-material" title="${escapeHtml(material).replace(/"/g,'&quot;')}">${material ? escapeHtml(planShortMaterial(material)) : '—'}</div></td>
       <td>
         ${ownerPicker(r, job, stepKey)}
@@ -4293,7 +4300,7 @@ function renderPlanner(){
       </div>
     </div>` : '';
 
-  const extraNote = split ? `<li><b>ขั้นตอนแยก</b> — หน่วยงานที่ไม่อยู่ในลำดับสายหลักถือเป็นขั้นตอนแยก ไม่ได้ต่อจากขั้นตอนใด จึงคิดเวลาไว้ต่างหาก เผื่อของเสียชั้นเดียวจากยอดที่ต้องการ และไม่ถูกนับรวมในวันที่เสร็จของสายหลัก</li>` : '';
+  const extraNote = split ? `<li><b>ขั้นตอนแยก</b> — หน่วยงาน<b>จากข้อมูลย้อนหลัง</b>ที่ไม่อยู่ในลำดับสายหลักถือเป็นขั้นตอนแยก ไม่ได้ต่อจากขั้นตอนใด จึงคิดเวลาไว้ต่างหาก เผื่อของเสียชั้นเดียวจากยอดที่ต้องการ และไม่ถูกนับรวมในวันที่เสร็จของสายหลัก (ขั้นตอนที่<b>เพิ่มเอง</b>ไม่ใช่ขั้นตอนแยก — นับเป็นสายหลักโดยเรียงต่อกันตามลำดับที่กดเพิ่ม)</li>` : '';
   const warnHtml = plan.missingRate ? `<li class="plan-warn">มีขั้นตอนที่ไม่มีอัตราการผลิตในข้อมูลย้อนหลัง — กรอกอัตราเองในตาราง ไม่งั้นขั้นตอนนั้นจะไม่ถูกนับรวมในเวลาและวันที่</li>` : '';
   const assumeHtml = !plan.show.assume ? '' : `
     <div class="panel plan-assume">
