@@ -593,6 +593,7 @@
   .plan-src{font-family:var(--mono);font-size:10px;color:var(--text-faint);white-space:nowrap;}
   .plan-src.manual{color:var(--accent);}
   .plan-src.guess{color:var(--warn);}
+  .plan-remain-done{font-family:var(--mono);font-size:10px;color:var(--good);white-space:nowrap;}
   .plan-start-edit{display:flex;align-items:center;gap:5px;margin-top:4px;flex-wrap:nowrap;}
   .plan-start-input{width:190px;min-width:190px;text-align:left;padding:5px 6px;flex:none;}
   .plan-material{font-size:11.5px;color:var(--text-dim);line-height:1.5;max-width:260px;}
@@ -803,7 +804,8 @@
   .plan-job-left .plan-src{white-space:normal;}
   .plan-job-left .plan-cell-input{width:62px;}
   /* ยอด "ต้องทำ" เป็นเลขหลักหมื่น ช่องเท่าคอลัมน์อื่นจะโดนตัดท้าย */
-  .plan-job-left .plan-cell-input[data-field="qty"]{width:74px;}
+  .plan-job-left .plan-cell-input[data-field="qty"],
+  .plan-job-left .plan-cell-input[data-field="remain"]{width:74px;}
   /* ช่องแก้เวลาเริ่มอยู่ในคอลัมน์ "ช่วงวันที่" ของตารางครึ่งใบ จึงบีบให้แคบที่สุดเท่าที่ยังอ่านวันที่ครบ */
   .plan-job-left .plan-daterange{min-width:0;white-space:normal;line-height:1.6;}
   .plan-job-left .plan-start-input{width:188px;min-width:0;padding:5px 4px;}
@@ -2514,6 +2516,16 @@ function planStepStations(step, job){
   const ov = job.overrides[step.key];
   return (ov && ov.stations > 0) ? ov.stations : 1;
 }
+/** จำนวนที่ "ยังไม่ได้ทำ" ของขั้นตอนนี้ — ไม่กรอก = ยังไม่เริ่ม (เท่ากับยอดที่ต้องทำทั้งหมด)
+ *  กรอก 0 = ขั้นตอนนี้ทำครบแล้ว ไม่กินเวลาและไม่กินคิวคนอีก
+ *  ใช้ตอนกลับมาวางแผนกลางคัน — งานที่เดินไปแล้วบางส่วนจะได้ไม่ถูกนับซ้ำ
+ *  และของที่ทำไปแล้วถือว่ากองรออยู่หน้าหน่วยถัดไปตั้งแต่ต้นแผน */
+function planStepRemain(step, job, qtyIn){
+  const ov = job.overrides[step.key];
+  const v = ov ? ov.remain : null;
+  if(v == null || !(v >= 0)) return {remain: qtyIn, manual: false};
+  return {remain: Math.max(0, Math.min(qtyIn, v)), manual: true};
+}
 /** ชื่อผู้รับผิดชอบขั้นตอนนี้ (พิมพ์เองในตาราง) — ว่าง = ยังไม่ระบุตัวคน คิดคิวรวมที่หน่วยงานแทน */
 function planStepOwner(step, job){
   const ov = job.overrides[step.key];
@@ -2619,7 +2631,12 @@ function computePlan(){
       r.rate = rate;
       r.rate_src = src;
       r.stations = planStepStations(r.step, job);
-      r.hours = (rate && rate > 0) ? r.qty_in/(rate*r.stations) : null;
+      // เวลาที่ต้องใช้คิดจาก "ที่ยังเหลือ" เท่านั้น ของที่ทำไปแล้วไม่ต้องทำซ้ำ
+      const rm = planStepRemain(r.step, job, r.qty_in);
+      r.qty_remain = rm.remain;
+      r.remain_manual = rm.manual;
+      r.qty_done = Math.max(0, r.qty_in - r.qty_remain);
+      r.hours = (rate && rate > 0) ? r.qty_remain/(rate*r.stations) : null;
       r.days = r.hours != null ? r.hours/hpd : null;
       r.owner = planStepOwner(r.step, job);
       r.assigned = [];
@@ -2666,9 +2683,13 @@ function computePlan(){
       let fedAt;
       if(prevRate > 0 && thisRate > 0 && prev.end_dt){
         const needQty = Math.min(prev.qty_in, wipHours * thisRate);
-        const fed = planAdvanceHours(prev.start_dt, needQty/prevRate, hpd, shiftMin);
+        // ของที่หน่วยก่อนหน้าทำไปแล้วกองรออยู่หน้างานตั้งแต่ต้นแผน — เหลือรอเฉพาะส่วนที่ยังขาด
+        const stillNeed = Math.max(0, needQty - (prev.qty_done || 0));
+        const fed = stillNeed > 0
+          ? planAdvanceHours(prev.start_dt, stillNeed/prevRate, hpd, shiftMin)
+          : new Date(ready.getTime());
         fedAt = fed > prev.end_dt ? new Date(prev.end_dt.getTime()) : fed;
-        if(waitQty == null || needQty > waitQty) waitQty = needQty;
+        if(waitQty == null || stillNeed > waitQty) waitQty = stillNeed;
       }else{
         // ไม่มีอัตราการผลิตให้คิดจุดส่งของ — กลับไปรอให้ขั้นก่อนหน้าเสร็จก่อนตามเดิม
         fedAt = new Date((prev.end_dt || prev.start_dt).getTime());
@@ -2712,7 +2733,8 @@ function computePlan(){
     if(r.hours != null){
       let end = planAdvanceHours(r.start_dt, r.hours, hpd, shiftMin);
       // หน่วยนี้เร็วกว่าหน่วยก่อนหน้า = ทำไปรอของไป เสร็จได้เร็วสุดคือหลังรับของก้อนสุดท้ายมาทำจนจบ
-      if(info.prevEnd && r.wait_qty != null && !r.start_override){
+      // ขั้นตอนที่ทำครบแล้ว (เหลือ 0) ไม่ต้องรอของอีก จบตรงจุดเริ่มเลย
+      if(info.prevEnd && r.wait_qty != null && !r.start_override && r.hours > 0){
         const tailEnd = planAdvanceHours(info.prevEnd, r.wait_qty/(r.rate*r.stations), hpd, shiftMin);
         if(tailEnd > end){
           end = tailEnd;
@@ -3326,7 +3348,7 @@ function planExportExcel(){
     ]);
   });
 
-  const detailHeader = ['ลำดับ Item','รหัส Item','จำนวน Item (ชิ้น)','ประเภทขั้นตอน','ลำดับขั้นตอน','ขั้นตอน (หน่วยงาน)','ชื่อวัตถุดิบ','ผู้รับผิดชอบ','อัตรา (ชิ้น/ชม.)','ที่มาอัตรา','จำนวนสถานีที่ทำขนาน','ต้องทำ (ชิ้น)','ชั่วโมง','วัน','เริ่ม','สิ้นสุด','เริ่มได้เมื่อ','อ้างอิง (รายการ)'];
+  const detailHeader = ['ลำดับ Item','รหัส Item','จำนวน Item (ชิ้น)','ประเภทขั้นตอน','ลำดับขั้นตอน','ขั้นตอน (หน่วยงาน)','ชื่อวัตถุดิบ','ผู้รับผิดชอบ','อัตรา (ชิ้น/ชม.)','ที่มาอัตรา','จำนวนสถานีที่ทำขนาน','ต้องทำ (ชิ้น)','เหลือ (ชิ้น)','ชั่วโมง','วัน','เริ่ม','สิ้นสุด','เริ่มได้เมื่อ','อ้างอิง (รายการ)'];
   const detailRows = [detailHeader];
   plan.jobs.forEach((jp,i)=>{
     const pushRow = (r, no, kind)=>{
@@ -3342,7 +3364,7 @@ function planExportExcel(){
       detailRows.push([
         i+1, jp.job.item, jp.qty, kind, no || '', r.step.dept,
         r.step.material || '', r.owner || (r.assigned || []).join(', '), r.rate != null ? planRound2(r.rate) : '', r.rate_src ? (PLAN_RATE_SRC_LABEL[r.rate_src]||'') : 'ไม่มีข้อมูล',
-        r.stations, Math.round(r.qty_in), r.hours != null ? planRound2(r.hours) : '', r.days != null ? planRound2(r.days) : '',
+        r.stations, Math.round(r.qty_in), Math.round(r.qty_remain != null ? r.qty_remain : r.qty_in), r.hours != null ? planRound2(r.hours) : '', r.days != null ? planRound2(r.days) : '',
         r.start_dt ? planFmtDateTime(r.start_dt) : '', r.end_dt ? planFmtDateTime(r.end_dt) : '', startWhy, r.step.n
       ]);
     };
@@ -3817,6 +3839,12 @@ function renderPlanner(){
         <input class="plan-cell-input${r.qty_manual ? ' manual' : ''}" type="number" min="0" step="1" data-field="qty" data-job="${job.uid}" data-key="${stepKey}" value="${Math.round(r.qty_in)}">
         ${r.qty_manual ? '<div class="plan-src manual">แก้เอง</div>' : ''}
       </td>
+      <td class="num">
+        <input class="plan-cell-input${r.remain_manual ? ' manual' : ''}" type="number" min="0" step="1" data-field="remain" data-job="${job.uid}" data-key="${stepKey}" value="${Math.round(r.qty_remain)}" title="จำนวนที่ยังไม่ได้ทำของขั้นตอนนี้ — ลดลงตามของที่เดินไปแล้ว ใส่ 0 ถ้าทำครบแล้ว เวลาที่คำนวณจะนับเฉพาะส่วนที่เหลือ">
+        ${r.remain_manual ? (r.qty_remain > 0
+            ? `<div class="plan-src manual">ทำไปแล้ว ${fmtNum(Math.round(r.qty_done))}</div>`
+            : '<div class="plan-src plan-remain-done">ทำครบแล้ว</div>') : ''}
+      </td>
       <td class="mono plan-daterange">
         ${r.start_dt ? `<div class="plan-start-edit">
           <input class="plan-cell-input plan-start-input" type="datetime-local" data-field="startAt" data-job="${job.uid}" data-key="${stepKey}" value="${planFmtDateTimeLocal(r.start_dt)}" title="เวลาเริ่มขั้นตอนนี้ — แก้ได้ให้สอดคล้องกับความเป็นจริง">
@@ -3857,6 +3885,8 @@ function renderPlanner(){
   const jobTotalParts = (jp)=>{
     const range = jp.start_dt ? `<span class="mono">${planFmtDateTime(jp.start_dt)} → ${planFmtDateTime(jp.end_dt)}</span>` : '';
     const parts = [];
+    // มีขั้นตอนที่เดินไปแล้วบางส่วน ตัวเลขชั่วโมง/วันจึงเป็นของ "ที่ยังเหลือ" ไม่ใช่ทั้งออร์เดอร์
+    if(jp.main.concat(jp.extra).some(r=> r.remain_manual)) parts.push('มีขั้นตอนที่ทำไปแล้วบางส่วน — ชั่วโมงและวันด้านล่างนับเฉพาะ<b>งานที่ยังเหลือ</b>');
     if(jp.extra.length) parts.push(`รวมเฉพาะสายหลัก <b>${fmtHM(jp.mainHours)}</b> ชม. · <b>${fmtNum(jp.mainDays,2)}</b> วัน${range ? ' · ' + range : ''}`);
     parts.push(`รวม Item นี้ <b>${fmtHM(jp.totalHours)}</b> ชม. · <b>${fmtNum(jp.totalDays,2)}</b> วัน${(!jp.extra.length && range) ? ' · ' + range : ''}`);
     return parts;
@@ -3866,12 +3896,12 @@ function renderPlanner(){
     const job = jp.job;
     const mainBody = jp.main.map((r,k)=> rowHtml(r, job, k+1, jp.main.length, 'main')).join('');
     const extraBody = jp.extra.length
-      ? `<tr class="plan-sep"><td colspan="8">ขั้นตอนแยก — ไม่ได้อยู่ในลำดับสายหลัก จึงไม่ผูกวันที่และไม่นับรวมในวันที่เสร็จ (เลื่อนขึ้น/ลงได้เพื่อจัดลำดับที่แสดง)</td></tr>` + jp.extra.map((r,k)=> rowHtml(r, job, k+1, jp.extra.length, 'extra')).join('')
+      ? `<tr class="plan-sep"><td colspan="9">ขั้นตอนแยก — ไม่ได้อยู่ในลำดับสายหลัก จึงไม่ผูกวันที่และไม่นับรวมในวันที่เสร็จ (เลื่อนขึ้น/ลงได้เพื่อจัดลำดับที่แสดง)</td></tr>` + jp.extra.map((r,k)=> rowHtml(r, job, k+1, jp.extra.length, 'extra')).join('')
       : '';
     // ไทม์ไลน์ของใบนี้เป็นเนื้อหาฝั่งขวาทั้งฝั่ง — ถ้าไม่มี (ปิดไว้ / ยังไม่มีวันที่) ก็แสดงตารางเต็มความกว้างแทน
     const tlHtml = jobTimelineHtml(jp);
     const totalRows = tlHtml ? '' : jobTotalParts(jp).map(t=> `
-            <tr class="plan-tot"><td colspan="8">${t}</td></tr>`).join('');
+            <tr class="plan-tot"><td colspan="9">${t}</td></tr>`).join('');
     const noSteps = !jp.main.length && !jp.extra.length;
     const usedDepts = new Set(job.steps.map(s=> s.dept));
     const deptChoices = planDeptOptions().filter(d=> !usedDepts.has(d));
@@ -3914,6 +3944,7 @@ function renderPlanner(){
               <th class="num">อัตรา (ชิ้น/ชม.)</th>
               <th class="num">สถานีที่ทำขนาน</th>
               <th class="num">ต้องทำ (ชิ้น)</th>
+              <th class="num">เหลือ (ชิ้น)</th>
               <th>เริ่ม → จบ</th>
             </tr>
           </thead>
@@ -4012,11 +4043,14 @@ function renderPlanner(){
     const idleHours = r.hours != null ? spanHours - r.hours : 0;
     const intermittent = tlIntermittent(r);
     const material = cleanMaterialDisplay(r.step.material || '') || 'ไม่มีข้อมูลวัตถุดิบ';
-    const label = intermittent
-      ? `${fmtNum(r.days,2)} วัน · คร่อม ${fmtNum(spanHours/plan.hpd,2)}`
-      : `${fmtNum(r.days,2)} วัน`;
+    const label = (r.qty_remain === 0)
+      ? 'ทำครบแล้ว'
+      : (intermittent
+          ? `${fmtNum(r.days,2)} วัน · คร่อม ${fmtNum(spanHours/plan.hpd,2)}`
+          : `${fmtNum(r.days,2)} วัน`);
     const tip = `${r.step.dept}${r.owner ? ' (' + r.owner + ')' : ''} — ${material}`
-      + `\nต้องทำ ${fmtNum(r.qty_in)} ชิ้น · เดินเครื่อง ${fmtNum(r.days,2)} วัน (${fmtHM(r.hours)} ชม.)`
+      + `\nต้องทำ ${fmtNum(r.qty_in)} ชิ้น${r.qty_done > 0 ? ' · ทำไปแล้ว ' + fmtNum(Math.round(r.qty_done)) + ' เหลือ ' + fmtNum(Math.round(r.qty_remain)) : ''}`
+      + `\nเดินเครื่อง ${fmtNum(r.days,2)} วัน (${fmtHM(r.hours)} ชม.)`
       + `\n${planRateNote(r)}`
       + (intermittent ? `\nคร่อมช่วง ${fmtNum(spanHours/plan.hpd,2)} วัน — รอของระหว่างทำรวม ${fmtHM(idleHours)} ชม.` : '')
       + `\n${planFmtDateTime(r.tl_start)} → ${planFmtDateTime(r.tl_end)}`;
@@ -4881,6 +4915,13 @@ function planRenderShiftInputs(){
         job.overrides[key].owner = inp.value;
         job.overrides[key].ownerCustom = false;
       }
+      renderPlanner();
+      return;
+    }
+    // จำนวนที่เหลือ — 0 มีความหมายจริง (ทำครบแล้ว) ต่างจากช่องอื่นที่ 0 = ยังไม่ได้กรอก
+    if(field === 'remain'){
+      const rv = parseFloat(inp.value);
+      job.overrides[key].remain = (String(inp.value).trim() === '' || isNaN(rv) || rv < 0) ? null : rv;
       renderPlanner();
       return;
     }
