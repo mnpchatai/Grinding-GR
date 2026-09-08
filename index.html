@@ -1388,8 +1388,74 @@ else { document.getElementById('authInput').focus(); }
 
 const SNAPSHOT_DATA = JSON.parse(document.getElementById('rawData').textContent);
 
+// ---------- ทำความสะอาดข้อความที่รับมาจากชีต ----------
+// ข้อความที่คนพิมพ์เข้าชีตมักติดช่องว่างหัว-ท้าย ช่องว่างซ้อนกลางข้อความ หรืออักขระที่มองไม่เห็น
+// (NBSP, zero-width, BOM) ที่ copy ติดมาจากที่อื่น สายตาคนอ่านเห็นเป็นข้อความเดียวกันทุกประการ
+// แต่ JS เทียบสตริงแล้วไม่เท่ากัน จึงหลุดออกมาเป็นตัวเลือกซ้ำใน dropdown และเป็นแถวซ้ำในลิสต์
+// ล้างที่จุดรับข้อมูลจุดเดียว ทุกหน้าที่ใช้ RAW ต่อ (แดชบอร์ด เป้าการผลิต วางแผนการผลิต) จึงได้ค่าที่สะอาดเหมือนกันหมด
+const SHEET_TEXT_FIELDS = ['item_code','material','dept','customer','po','employee','month','date','date_iso','no'];
+// ฟิลด์ที่เป็น "ชื่อ/รหัส" ซึ่งสะกดต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่ถือเป็นค่าเดียวกัน
+const SHEET_NAME_FIELDS = ['item_code','material','dept','customer','po','employee'];
+
+function normalizeSheetText(v){
+  if(typeof v !== 'string') return v;
+  return v
+    .replace(/[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g, ' ')  // ช่องว่างรูปแบบอื่น -> ช่องว่างปกติ
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')                       // อักขระความกว้างศูนย์ / BOM
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** รวมการสะกดที่ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่ให้เหลือรูปเดียว โดยเลือกรูปที่พบบ่อยที่สุดเป็นตัวแทน
+ *  (เช่น "ST-01(P)" กับ "ST-01(p)" คือ Item เดียวกัน ไม่ควรกลายเป็นสองตัวเลือก/สองแถว) */
+function buildCanonicalSpelling(rows, field){
+  const forms = new Map();   // ตัวพิมพ์เล็กล้วน -> Map(รูปที่พบ -> จำนวนครั้ง)
+  rows.forEach(r=>{
+    const v = r[field];
+    if(!v) return;
+    const k = v.toLowerCase();
+    if(!forms.has(k)) forms.set(k, new Map());
+    const m = forms.get(k);
+    m.set(v, (m.get(v) || 0) + 1);
+  });
+  const canon = new Map();
+  forms.forEach((variants, k)=>{
+    let best = '', bestCount = -1;
+    variants.forEach((count, form)=>{ if(count > bestCount){ bestCount = count; best = form; } });
+    canon.set(k, best);
+  });
+  return canon;
+}
+
+/** ข้อมูลทุกชุด (snapshot และที่ดึงสดจากชีต) ต้องผ่านตรงนี้ก่อนเข้า RAW เสมอ */
+function normalizeSheetRows(data){
+  const rows = (Array.isArray(data) ? data : []).map(r=>{
+    const out = Object.assign({}, r);
+    SHEET_TEXT_FIELDS.forEach(f=>{ if(f in out) out[f] = normalizeSheetText(out[f]); });
+    return out;
+  });
+  SHEET_NAME_FIELDS.forEach(f=>{
+    const canon = buildCanonicalSpelling(rows, f);
+    rows.forEach(r=>{ if(r[f]) r[f] = canon.get(r[f].toLowerCase()) || r[f]; });
+  });
+  return rows;
+}
+
+/** ลิสต์ตัวเลือกของ dropdown ที่ไม่ซ้ำกัน — เทียบแบบไม่สนตัวพิมพ์เล็ก-ใหญ่และช่องว่าง
+ *  เพื่อไม่ให้มีสองบรรทัดที่อ่านแล้วเหมือนกันทุกตัวอักษร (ข้าม '—' ซึ่งเป็นแค่ตัวแทนค่าว่าง) */
+function uniqueOptions(values){
+  const seen = new Map();
+  (values || []).forEach(v=>{
+    const t = normalizeSheetText(v || '');
+    if(!t || t === '—') return;
+    const k = t.toLowerCase();
+    if(!seen.has(k)) seen.set(k, t);
+  });
+  return [...seen.values()].sort((a,b)=> a.localeCompare(b));
+}
+
 // ---------- state ----------
-let RAW = SNAPSHOT_DATA;
+let RAW = normalizeSheetRows(SNAPSHOT_DATA);
 let allMonths = [], allEmployees = [], allDepts = [], allCustomers = [], allPOs = [], allItems = [], monthLabels = {};
 let autoRefreshTimer = null;
 
@@ -1443,7 +1509,7 @@ async function fetchLive(url, {silent=false}={}){
     const data = await res.json();
     if(data && data.error) throw new Error(data.error);
     if(!Array.isArray(data)) throw new Error('รูปแบบข้อมูลที่ได้ไม่ใช่ array');
-    RAW = data;
+    RAW = normalizeSheetRows(data);
     localStorage.setItem(LS_KEY, url);
     initFromData(RAW);
     setConnStatus('live', `เชื่อมต่อสำเร็จ — ข้อมูล <b>live</b> จาก Google Sheet (${data.length.toLocaleString()} แถว) · อัปเดตล่าสุด <b>${fmtTime(new Date())}</b>`);
@@ -1600,19 +1666,28 @@ function groupProductionData(data){
   const map = new Map();
   data.forEach(r=>{
     if(!r.item_code && !r.material) return;
-    const key = (r.item_code||'') + '|' + (r.material||'') + '|' + (r.dept||'');
-    const existing = map.get(key);
-    if(!existing || (r.date_iso && r.date_iso > existing.date_iso)){
-      map.set(key, {
-        item_code: r.item_code || '—',
-        material: r.material || '—',
-        dept: r.dept || '—',
-        target_100: r.target_100,
-        date_iso: r.date_iso || ''
-      });
+    const item = r.item_code || '—';
+    const material = r.material || '—';
+    const dept = r.dept || '—';
+    const display = cleanMaterialDisplay(material).trim();
+    // จัดกลุ่มด้วย "สิ่งที่ผู้ใช้เห็นบนจอ" ไม่ใช่ข้อความดิบ — ชื่อวัตถุดิบที่ต่างกันแค่สี
+    // (เช่น ...ดำ BK01 กับ ...แดง RD01) ถูกตัดสีออกตอนแสดงผล จึงเหลือข้อความเดียวกันเป๊ะ
+    // ถ้าคีย์ด้วยข้อความดิบจะได้แถวหน้าตาเหมือนกันทุกตัวอักษรซ้อนกันหลายแถว ทั้งที่เป็นเป้าเดียวกัน
+    const key = [item.toLowerCase(), display.toLowerCase(), dept.toLowerCase()].join('|');
+    const g = map.get(key);
+    if(!g){
+      map.set(key, {item_code:item, material, display, dept, target_100:r.target_100, date_iso:r.date_iso || ''});
+      return;
+    }
+    // ตัวแทนของกลุ่ม = บรรทัดล่าสุด (เป้าที่ใช้อยู่จริงตอนนี้)
+    if(r.date_iso && r.date_iso > g.date_iso){
+      g.material = material;
+      g.display = display;
+      g.target_100 = r.target_100;
+      g.date_iso = r.date_iso;
     }
   });
-  return [...map.values()].sort((a,b)=> a.item_code.localeCompare(b.item_code) || a.material.localeCompare(b.material));
+  return [...map.values()].sort((a,b)=> a.item_code.localeCompare(b.item_code) || a.display.localeCompare(b.display));
 }
 
 function buildProductionDeptFilter(depts){
@@ -1752,11 +1827,12 @@ function setupSearchableSelect({inputId, panelId, clearId, getOptions, onSelect,
 
 setupSearchableSelect({
   inputId:'prodSearchItem', panelId:'ssItemPanel', clearId:'ssItemClear', stateKey:'itemQuery',
-  getOptions: ()=>[...new Set(groupedProduction.map(r=>r.item_code))].filter(Boolean).sort()
+  getOptions: ()=> uniqueOptions(groupedProduction.map(r=>r.item_code))
 });
 setupSearchableSelect({
   inputId:'prodSearchMaterial', panelId:'ssMaterialPanel', clearId:'ssMaterialClear', stateKey:'materialQuery',
-  getOptions: ()=>[...new Set(groupedProduction.map(r=>r.material))].filter(Boolean).sort()
+  // ใช้ชื่อที่แสดงจริงในลิสต์ (ตัดสีออกแล้ว) ตัวเลือกจึงตรงกับสิ่งที่เห็น และไม่มีชื่อเดียวกันโผล่ซ้ำตามจำนวนสี
+  getOptions: ()=> uniqueOptions(groupedProduction.map(r=>r.display))
 });
 // สีของป้ายหน่วยงาน — กำหนดตายตัวสำหรับหน่วยงานหลัก ที่เหลือสุ่มจากชุดสีสำรองแบบ deterministic
 const DEPT_COLORS = {
@@ -1791,7 +1867,11 @@ function renderProduction(){
 
   const filtered = groupedProduction.filter(row=>{
     if(prodState.itemQuery && !row.item_code.toLowerCase().includes(prodState.itemQuery)) return false;
-    if(prodState.materialQuery && !row.material.toLowerCase().includes(prodState.materialQuery)) return false;
+    // ตัวเลือกใน dropdown เป็นชื่อที่ตัดสีออกแล้ว ส่วนคนที่พิมพ์เองอาจพิมพ์คำสี/รหัสสีที่มีในข้อความดิบ
+    // จึงยอมให้ตรงกับอย่างใดอย่างหนึ่งก็พอ
+    if(prodState.materialQuery
+       && !row.display.toLowerCase().includes(prodState.materialQuery)
+       && !row.material.toLowerCase().includes(prodState.materialQuery)) return false;
     if(prodState.dept && row.dept !== prodState.dept) return false;
     return true;
   });
@@ -1807,7 +1887,7 @@ function renderProduction(){
     <div class="prod-row">
       <div class="prod-row-main">
         <div class="prod-item-code">${row.item_code}</div>
-        <div class="prod-material">${cleanMaterialDisplay(row.material)}</div>
+        <div class="prod-material">${row.display}</div>
       </div>
       <div class="prod-row-meta">
        <span class="prod-dept-pill" style="background:${getDeptColor(row.dept).bg};color:${getDeptColor(row.dept).text};border-color:${getDeptColor(row.dept).border};">${row.dept}</span>
@@ -2173,7 +2253,7 @@ function planMaterialFamily(material){
 }
 
 function planItemOptions(){
-  return [...new Set(RAW.filter(r=> r.item_code && r.dept).map(r=>r.item_code))].sort();
+  return uniqueOptions(RAW.filter(r=> r.item_code && r.dept).map(r=>r.item_code));
 }
 
 /** รับค่ารหัส Item ที่พิมพ์/เลือกให้กับแถวในแผน — เรียกทั้งจากปุ่มเลือกใน dropdown และตอนพิมพ์แล้วออกจากช่อง */
@@ -2335,7 +2415,9 @@ function planDeptOptions(){
  *  (เช่น มีบอล/พิน/ปลอกคอในรหัสเดียวกัน) จะได้แถวแยกกันแม้อยู่หน่วยงานเดียวกัน (เช่น เจียร์บอล/เจียร์พิน)
  *  manualDepts = รายชื่อหน่วยงานที่ผู้ใช้เพิ่มเอง (สำหรับ Item ที่ไม่มี/ไม่ครบข้อมูลย้อนหลัง) */
 function buildPlanSteps(item, userOrder, manualDepts){
-  const rows = item ? RAW.filter(r=> (r.item_code||'') === item && r.dept) : [];
+  // เทียบรหัส Item แบบไม่สนช่องว่างหัวท้าย/ตัวพิมพ์เล็ก-ใหญ่ — คนกรอกเองในช่องอาจพิมพ์คนละแบบกับที่บันทึกไว้ในชีต
+  const wanted = (item || '').trim().toLowerCase();
+  const rows = wanted ? RAW.filter(r=> (r.item_code||'').trim().toLowerCase() === wanted && r.dept) : [];
   const byKey = new Map();
   rows.forEach(r=>{
     const materialRaw = (r.material || '').trim();
@@ -5411,7 +5493,7 @@ function renderTable(data){
   document.getElementById('nextPage').disabled = state.page>=totalPages;
 }
 
-initFromData(SNAPSHOT_DATA);
+initFromData(RAW);
 
 // ผู้ที่ยังจำล็อกอินอยู่แล้วเปิดลิงค์ที่แชร์มา — พาไปหน้าแผนนั้นทันทีโดยไม่ต้องกรอกรหัสผ่านซ้ำ
 if(checkExistingAuth()) planApplySharedFromHash();
