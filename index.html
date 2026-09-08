@@ -878,6 +878,19 @@
   .plan-manual-add{display:flex;gap:8px;align-items:center;margin-top:12px;}
   .plan-manual-dept-input{flex:1;max-width:320px;}
   .plan-del-step{margin-left:6px;}
+  /* ขั้นตอนที่ถูกเอาออกจากแผนใบนี้ — ยังเรียกคืนได้ ข้อมูลย้อนหลังในชีตไม่ถูกแตะ */
+  .plan-hidden-bar{
+    display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px;
+    background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;padding:9px 11px;
+  }
+  .plan-hidden-label{font-size:11.5px;color:var(--text-dim);}
+  .plan-hidden-chip{
+    display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-family:inherit;
+    background:none;border:1px solid var(--border);border-radius:999px;
+    padding:4px 11px;font-size:11.5px;color:var(--text-dim);
+  }
+  .plan-hidden-chip:hover{border-color:var(--accent);color:var(--accent);}
+  .plan-hidden-note{font-size:10.5px;color:var(--text-faint);flex-basis:100%;line-height:1.6;}
   .plan-assume ul{margin:0;padding-left:18px;color:var(--text-dim);font-size:12px;line-height:1.9;}
   .plan-assume b{color:var(--text);}
   .plan-warn{color:var(--warn);}
@@ -2301,10 +2314,11 @@ function planCommitItemValue(job, raw){
   const match = planItemOptions().find(i => i.toLowerCase() === raw.toLowerCase());
   job.item = match || raw;
   // เปลี่ยน Item = ขั้นตอนคนละชุด ค่าที่พิมพ์ทับ/ขั้นตอนที่เพิ่มเองไว้ของเดิมจึงใช้ไม่ได้
-  job.steps = job.item ? buildPlanSteps(job.item, [], []) : [];
+  job.steps = job.item ? buildPlanSteps(job.item, [], [], []) : [];
   job.order = [];
   job.overrides = {};
   job.manualSteps = [];
+  job.hiddenSteps = [];
 }
 
 // ---------- dropdown ค้นหารหัส Item ของแต่ละแถวในแผน (แทน native <datalist> ซึ่ง Safari บนมือถือ
@@ -2452,8 +2466,9 @@ function planDeptOptions(){
 
 /** สรุปสถิติย้อนหลังของ Item หนึ่ง แยกตาม "ชิ้นส่วน" (วัตถุดิบ) + หน่วยงาน — Item ที่เป็นเซ็ต
  *  (เช่น มีบอล/พิน/ปลอกคอในรหัสเดียวกัน) จะได้แถวแยกกันแม้อยู่หน่วยงานเดียวกัน (เช่น เจียร์บอล/เจียร์พิน)
- *  manualDepts = รายชื่อหน่วยงานที่ผู้ใช้เพิ่มเอง (สำหรับ Item ที่ไม่มี/ไม่ครบข้อมูลย้อนหลัง) */
-function buildPlanSteps(item, userOrder, manualDepts){
+ *  manualDepts = รายชื่อหน่วยงานที่ผู้ใช้เพิ่มเอง (สำหรับ Item ที่ไม่มี/ไม่ครบข้อมูลย้อนหลัง)
+ *  hiddenKeys  = กุญแจของขั้นตอนที่ผู้ใช้เอาออกจากแผนใบนี้ (ซ่อนเฉพาะในแผน ไม่แตะข้อมูลย้อนหลังในชีต) */
+function buildPlanSteps(item, userOrder, manualDepts, hiddenKeys){
   // เทียบรหัส Item แบบไม่สนช่องว่างหัวท้าย/ตัวพิมพ์เล็ก-ใหญ่ — คนกรอกเองในช่องอาจพิมพ์คนละแบบกับที่บันทึกไว้ในชีต
   const wanted = (item || '').trim().toLowerCase();
   const rows = wanted ? RAW.filter(r=> (r.item_code||'').trim().toLowerCase() === wanted && r.dept) : [];
@@ -2558,13 +2573,33 @@ function buildPlanSteps(item, userOrder, manualDepts){
       return ia - ib;
     });
   }
-  return orderedSteps;
+
+  // ขั้นตอนที่ผู้ใช้กด ✕ เอาออกจากแผนใบนี้ — ตัดทิ้งหลังเรียงเสร็จ ลำดับของขั้นตอนที่เหลือจึงไม่เพี้ยน
+  // เป็นการเอาออก "เฉพาะแผนนี้" เท่านั้น ข้อมูลย้อนหลังในชีตไม่ถูกแก้ และกดคืนกลับมาได้ตลอด
+  const hidden = new Set(hiddenKeys || []);
+  return hidden.size ? orderedSteps.filter(s=> !hidden.has(s.key)) : orderedSteps;
+}
+
+/** ขั้นตอนทั้งหมดของ Item หนึ่งแบบไม่ตัดของที่เอาออก — ใช้หาชื่อไปแสดงบนแถบ "ขั้นตอนที่เอาออก"
+ *  เพื่อให้ผู้ใช้รู้ว่าเอาอะไรออกไปบ้าง แล้วกดคืนได้ถูกตัว */
+function planHiddenStepInfo(job){
+  const keys = job.hiddenSteps || [];
+  if(!keys.length) return [];
+  const all = job.item || (job.manualSteps || []).length
+    ? buildPlanSteps(job.item || null, job.order || [], job.manualSteps || [], [])
+    : [];
+  const byKey = new Map(all.map(s=> [s.key, s]));
+  return keys.map(k=>{
+    const s = byKey.get(k);
+    const material = s ? cleanMaterialDisplay(s.material || '').trim() : '';
+    return {key: k, dept: s ? s.dept : k.split('\u0001')[0], material};
+  });
 }
 
 function planFindJob(uid){ return planState.jobs.find(j=> j.uid === uid); }
 
 function planNewJob(){
-  return {uid: ++planJobUid, item:'', qty: 1000, startIso:'', dueIso:'', steps: [], order: [], overrides: {}, manualSteps: [], manualDeptDraft: ''};
+  return {uid: ++planJobUid, item:'', qty: 1000, startIso:'', dueIso:'', steps: [], order: [], overrides: {}, manualSteps: [], hiddenSteps: [], manualDeptDraft: ''};
 }
 /** เฉพาะแถวที่กรอกรหัส Item ไว้ — รวมถึง Item ใหม่ที่ยังไม่มีขั้นตอนจากประวัติ
  *  แต่มีขั้นตอนที่เพิ่มเองรออยู่ (หรือรอเพิ่ม) ก็ยังนับเป็นรายการในแผน */
@@ -2581,7 +2616,7 @@ function planAddRow(){
 /** ปุ่ม "คำนวณเวลาในการผลิต" — อ่านทุกแถวแล้วสร้างผลลัพธ์ */
 function planCompute(){
   planState.jobs.forEach(j=>{
-    j.steps = j.item ? buildPlanSteps(j.item, j.order, j.manualSteps) : [];
+    j.steps = j.item ? buildPlanSteps(j.item, j.order, j.manualSteps, j.hiddenSteps) : [];
   });
   planState.computed = planValidJobs().length > 0;
   planState.dirty = false;
@@ -3219,7 +3254,7 @@ function planSuggestSignature(){
     planState.shiftStart, planState.shiftEnd, planBreaksText(), planState.startIso, planState.dueIso,
     planState.scrapPct, planState.rateBasis, planState.flowMode, planState.wipHours,
     planState.capacity, planState.workers,
-    planValidJobs().map(j=> [j.item, j.qty, j.startIso || '', j.dueIso || '', j.order || [], j.manualSteps || [], j.overrides || {}])
+    planValidJobs().map(j=> [j.item, j.qty, j.startIso || '', j.dueIso || '', j.order || [], j.manualSteps || [], j.hiddenSteps || [], j.overrides || {}])
   ]);
 }
 let planSuggestCache = null;
@@ -3567,6 +3602,7 @@ function planSnapshotCurrent(){
     jobs: planValidJobs().map(j=> ({
       item: j.item, qty: j.qty, startIso: j.startIso || '', dueIso: j.dueIso || '',
       order: j.order || [], manualSteps: j.manualSteps || [],
+      hiddenSteps: j.hiddenSteps || [],
       overrides: j.overrides || {}
     }))
   };
@@ -3695,10 +3731,12 @@ function planApplySnapshotToState(entry){
     // แผนที่บันทึกไว้ก่อนมีช่องวันเริ่มรายไอเทม จะไม่มีค่านี้ = ไล่ตามลำดับในแผนเหมือนเดิม
     startIso: j.startIso || '',
     dueIso: j.dueIso || '',
-    steps: j.item ? buildPlanSteps(j.item, j.order || [], j.manualSteps || []) : [],
+    steps: j.item ? buildPlanSteps(j.item, j.order || [], j.manualSteps || [], j.hiddenSteps || []) : [],
     order: j.order || [],
     overrides: j.overrides || {},
-    manualSteps: j.manualSteps || []
+    manualSteps: j.manualSteps || [],
+    // แผนที่บันทึกไว้ก่อนมีปุ่มเอาขั้นตอนออก จะไม่มีค่านี้ = ไม่ได้เอาขั้นตอนไหนออก
+    hiddenSteps: Array.isArray(j.hiddenSteps) ? j.hiddenSteps : []
   }));
   if(!planState.jobs.length) planState.jobs.push(planNewJob());
   planState.computed = planValidJobs().length > 0;
@@ -3931,7 +3969,6 @@ function renderPlanner(){
   // ฝั่งซ้ายเหลือเฉพาะข้อมูลของงาน (ทำอะไร ใครทำ เท่าไร) ส่วนตัวเลขเวลาอยู่กับแท่งไทม์ไลน์ฝั่งขวา
   const rowHtml = (r, job, no, lastNo, kind, matLabels)=>{
     const c = getDeptColor(r.step.dept);
-    const dept = escapeHtml(r.step.dept).replace(/"/g,'&quot;');
     const stepKey = escapeHtml(r.step.key).replace(/"/g,'&quot;');
     const material = cleanMaterialDisplay(r.step.material || '').trim();
     const label = (matLabels && matLabels.get(r)) || {text: material, same: false};
@@ -3944,7 +3981,7 @@ function renderPlanner(){
       : `<span class="plan-seq-no">—</span>`;
     return `<tr>
       <td><div class="plan-seq">${seq}</div></td>
-      <td><span class="prod-dept-pill" style="background:${c.bg};color:${c.text};border-color:${c.border};">${escapeHtml((r.step.dept))}</span>${STEP_OPTIONAL[r.step.dept] ? '<div class="plan-src">เฉพาะบอลบางไซส์</div>' : ''}${r.step.rank_src === 'manual' ? `<button class="plan-move plan-del plan-del-step" data-delstep="${dept}" data-job="${job.uid}" title="ลบขั้นตอนที่เพิ่มเอง">✕</button>` : ''}<div class="plan-src plan-rank ${r.step.rank_src === 'standard' ? '' : 'guess'}" title="${escapeHtml((PLAN_RANK_LABEL[r.step.rank_src] || '').replace('· ',''))}${r.step.n ? ' · อ้างอิงจากข้อมูลย้อนหลัง ' + fmtNum(r.step.n) + ' รายการ' : ' · ไม่มีข้อมูลย้อนหลัง กรอกอัตราเอง'}">${PLAN_RANK_SHORT[r.step.rank_src] || ''}${r.step.n ? ' · ' + fmtNum(r.step.n) + ' รก.' : ''}</div></td>
+      <td><span class="prod-dept-pill" style="background:${c.bg};color:${c.text};border-color:${c.border};">${escapeHtml((r.step.dept))}</span><button class="plan-move plan-del plan-del-step" data-hidestep="${stepKey}" data-job="${job.uid}" title="${r.step.rank_src === 'manual' ? 'เอาขั้นตอนที่เพิ่มเองนี้ออกจากแผนนี้ — กดคืนได้จากแถบใต้ตาราง' : 'เอาขั้นตอนนี้ออกจากแผนนี้เท่านั้น — ไม่ลบข้อมูลย้อนหลังในชีต กดคืนได้จากแถบใต้ตาราง'}">✕</button>${STEP_OPTIONAL[r.step.dept] ? '<div class="plan-src">เฉพาะบอลบางไซส์</div>' : ''}<div class="plan-src plan-rank ${r.step.rank_src === 'standard' ? '' : 'guess'}" title="${escapeHtml((PLAN_RANK_LABEL[r.step.rank_src] || '').replace('· ',''))}${r.step.n ? ' · อ้างอิงจากข้อมูลย้อนหลัง ' + fmtNum(r.step.n) + ' รายการ' : ' · ไม่มีข้อมูลย้อนหลัง กรอกอัตราเอง'}">${PLAN_RANK_SHORT[r.step.rank_src] || ''}${r.step.n ? ' · ' + fmtNum(r.step.n) + ' รก.' : ''}</div></td>
       <td><div class="plan-material${label.same ? ' same' : ''}" title="${escapeHtml(material).replace(/"/g,'&quot;')}">${material ? (label.same ? 'ชิ้นส่วนเดิม' : escapeHtml(planShortMaterial(label.text))) : '—'}</div></td>
       <td>
         ${ownerPicker(r, job, stepKey)}
@@ -4039,7 +4076,21 @@ function renderPlanner(){
             <tr class="plan-tot"><td colspan="9">${t}</td></tr>`).join('');
     const noSteps = !jp.main.length && !jp.extra.length;
     const usedDepts = new Set(job.steps.map(s=> s.dept));
-    const deptChoices = planDeptOptions().filter(d=> !usedDepts.has(d));
+    // ขั้นตอนที่เอาออกจากแผนนี้ไว้ — โชว์เป็นชิปให้กดคืน และไม่เอาไปปนในลิสต์ "เพิ่มขั้นตอนเอง"
+    // (ถ้าปล่อยให้เลือกซ้ำ จะกดเพิ่มแล้วไม่เห็นอะไรขึ้น เพราะขั้นตอนเดิมยังถูกซ่อนอยู่)
+    const hiddenSteps = planHiddenStepInfo(job);
+    const hiddenDepts = new Set(hiddenSteps.map(h=> h.dept));
+    const deptChoices = planDeptOptions().filter(d=> !usedDepts.has(d) && !hiddenDepts.has(d));
+    const hiddenHtml = hiddenSteps.length ? `
+      <div class="plan-hidden-bar">
+        <span class="plan-hidden-label">เอาออกจากแผนนี้ (${hiddenSteps.length}):</span>
+        ${hiddenSteps.map(h=>{
+          const label = escapeHtml(h.dept) + (h.material ? ' · ' + escapeHtml(planShortMaterial(h.material)) : '');
+          return `<button class="plan-hidden-chip" data-restorestep="${escapeHtml(h.key).replace(/"/g,'&quot;')}" data-job="${job.uid}" title="เอากลับเข้าแผนที่ตำแหน่งเดิม">↩ ${label}</button>`;
+        }).join('')}
+        ${hiddenSteps.length > 1 ? `<button class="plan-collapse" data-restoreallsteps="${job.uid}">คืนทั้งหมด</button>` : ''}
+        <span class="plan-hidden-note">เอาออกเฉพาะแผนใบนี้ — ข้อมูลย้อนหลังในชีตยังอยู่ครบ ค่าที่พิมพ์ทับไว้ (อัตรา/ผู้รับผิดชอบ/เวลาเริ่ม) ก็เก็บไว้ให้ กดชิปเพื่อเอากลับเข้าแผน</span>
+      </div>` : '';
     const manualAddHtml = `
       <div class="plan-manual-add">
         <input class="search-box plan-manual-dept-input" list="planDeptList-${job.uid}" data-job="${job.uid}"
@@ -4087,6 +4138,7 @@ function renderPlanner(){
           </tbody>
         </table>
       </div>`}
+      ${hiddenHtml}
       ${manualAddHtml}
         </div>
         ${tlHtml ? `<div class="plan-job-right">${tlHtml}</div>` : ''}
@@ -4629,7 +4681,7 @@ window.addEventListener('resize', ()=>{
 /** เรียกเมื่อข้อมูลถูกโหลดใหม่ — Item ในแผน ลำดับ และค่าที่พิมพ์ทับยังคงอยู่ */
 function refreshPlanner(){
   planState.jobs.forEach(j=>{
-    j.steps = j.item ? buildPlanSteps(j.item, j.order, j.manualSteps) : [];
+    j.steps = j.item ? buildPlanSteps(j.item, j.order, j.manualSteps, j.hiddenSteps) : [];
   });
   if(planState.computed && !planValidJobs().length) planState.computed = false;
   const custList = document.getElementById('planCustomerList');
@@ -4912,25 +4964,43 @@ function planRenderShiftInputs(){
       const dept = input ? input.value.trim() : '';
       if(!dept) return;
       if(!job.manualSteps) job.manualSteps = [];
-      if(!job.manualSteps.includes(dept)){
+      // พิมพ์ชื่อหน่วยงานที่เพิ่งเอาออกจากแผนไป = ตั้งใจจะเอากลับ ไม่ใช่สร้างขั้นตอนเปล่าใบใหม่
+      // (ถ้าเพิ่มซ้ำจะไม่มีอะไรขึ้น เพราะขั้นตอนเดิมยังถูกซ่อนอยู่)
+      const back = planHiddenStepInfo(job).filter(h=> h.dept === dept).map(h=> h.key);
+      if(back.length){
+        job.hiddenSteps = (job.hiddenSteps || []).filter(k=> !back.includes(k));
+      }else if(!job.manualSteps.includes(dept)){
         job.manualSteps.push(dept);
-        job.steps = buildPlanSteps(job.item || null, job.order, job.manualSteps);
       }
+      job.steps = buildPlanSteps(job.item || null, job.order, job.manualSteps, job.hiddenSteps);
       job.manualDeptDraft = '';
       renderPlanner();
       return;
     }
-    // ปุ่ม ✕ บนขั้นตอนที่เพิ่มเอง — เอาขั้นตอนนั้นออก
-    const delManual = e.target.closest('[data-delstep]');
-    if(delManual){
-      const job = planFindJob(parseInt(delManual.getAttribute('data-job'), 10));
+    // ปุ่ม ✕ บนแถวขั้นตอน — เอาขั้นตอนนั้นออกจาก "แผนใบนี้" เท่านั้น
+    // ไม่แตะข้อมูลย้อนหลังในชีต และไม่ลบ job.order / job.overrides ทิ้ง — กดคืนแล้วขั้นตอนจึงกลับมา
+    // อยู่ตำแหน่งเดิมพร้อมค่าที่พิมพ์ทับไว้ (อัตรา/ผู้รับผิดชอบ/เวลาเริ่ม) เหมือนก่อนกดเอาออก
+    const hideStep = e.target.closest('[data-hidestep]');
+    if(hideStep){
+      const job = planFindJob(parseInt(hideStep.getAttribute('data-job'), 10));
       if(!job) return;
-      const dept = delManual.getAttribute('data-delstep');
-      const key = planStepKey(dept, '');   // ขั้นตอนที่เพิ่มเองไม่มีวัตถุดิบ จึงกุญแจ = หน่วยงานล้วนๆ
-      job.manualSteps = (job.manualSteps || []).filter(d=> d !== dept);
-      delete job.overrides[key];
-      job.order = (job.order || []).filter(k=> k !== key);
-      job.steps = buildPlanSteps(job.item || null, job.order, job.manualSteps);
+      const key = hideStep.getAttribute('data-hidestep');
+      if(!job.hiddenSteps) job.hiddenSteps = [];
+      if(!job.hiddenSteps.includes(key)) job.hiddenSteps.push(key);
+      job.steps = buildPlanSteps(job.item || null, job.order, job.manualSteps, job.hiddenSteps);
+      renderPlanner();
+      return;
+    }
+    // ชิป ↩ ใต้ตาราง — เอาขั้นตอนที่เคยเอาออกกลับเข้าแผน (ทีละอัน / ทั้งหมด)
+    const restoreStep = e.target.closest('[data-restorestep], [data-restoreallsteps]');
+    if(restoreStep){
+      const all = restoreStep.hasAttribute('data-restoreallsteps');
+      const uid = parseInt(all ? restoreStep.getAttribute('data-restoreallsteps') : restoreStep.getAttribute('data-job'), 10);
+      const job = planFindJob(uid);
+      if(!job) return;
+      const key = all ? null : restoreStep.getAttribute('data-restorestep');
+      job.hiddenSteps = all ? [] : (job.hiddenSteps || []).filter(k=> k !== key);
+      job.steps = buildPlanSteps(job.item || null, job.order, job.manualSteps, job.hiddenSteps);
       renderPlanner();
       return;
     }
