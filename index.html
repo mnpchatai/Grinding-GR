@@ -51,6 +51,9 @@
     --text:#eef0f3;
     --text-dim:#8b93a3;
     --text-faint:#5b6373;
+    /* สีเดียวกับ --text-faint แต่ใช้กับสิ่งที่ไม่ใช่ตัวอักษร (แถบเลื่อน เส้นขอบตอนชี้ ลูกศรของ select)
+       แยกออกมาเพื่อให้เปลี่ยนสีตัวอักษรของแต่ละหน้าได้โดยไม่ลากพวกนี้เปลี่ยนตามไปด้วย */
+    --rule-strong:#5b6373;
     --accent:#e8792b;
     --accent-dim:#e8792b33;
     --accent-2:#3fb3c9;
@@ -131,7 +134,7 @@
   .connect-bar.conn-error .connect-status b{color:var(--bad);}
   .connect-status{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--text-dim);}
   .connect-status b{color:var(--text);}
-  .dot-static{width:8px;height:8px;border-radius:50%;background:var(--text-faint);flex-shrink:0;}
+  .dot-static{width:8px;height:8px;border-radius:50%;background:var(--rule-strong);flex-shrink:0;}
   .dot-static.live{background:var(--good);box-shadow:0 0 8px var(--good);animation:pulse 1.6s infinite;}
   .dot-static.error{background:var(--bad);}
   .dot-static.loading{background:var(--warn);animation:pulse 0.8s infinite;}
@@ -312,7 +315,7 @@
     background:linear-gradient(90deg,var(--accent-2),var(--accent));
   }
   .gauge-target{
-    position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--text-faint);
+    position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--rule-strong);
   }
   .gauge-val{font-family:var(--mono);font-size:11.5px;text-align:right;color:var(--text);}
 
@@ -357,7 +360,7 @@
   ::-webkit-scrollbar{width:8px;height:8px;}
   ::-webkit-scrollbar-track{background:transparent;}
   ::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
-  ::-webkit-scrollbar-thumb:hover{background:var(--text-faint);}
+  ::-webkit-scrollbar-thumb:hover{background:var(--rule-strong);}
 
   .empty-state{padding:40px;text-align:center;color:var(--text-faint);font-size:13px;}
 
@@ -510,7 +513,7 @@
   .ss-panel::-webkit-scrollbar-thumb{
     background:var(--border);border-radius:8px;border:3px solid var(--surface-2);
   }
-  .ss-panel::-webkit-scrollbar-thumb:hover{background:var(--text-faint);}
+  .ss-panel::-webkit-scrollbar-thumb:hover{background:var(--rule-strong);}
   .ss-panel.open{display:block;}
   .ss-option{
     padding:8px 10px;border-radius:6px;font-size:12.8px;color:var(--text);
@@ -541,7 +544,7 @@
   .plan-item-dropdown::-webkit-scrollbar-thumb{
     background:var(--border);border-radius:8px;border:3px solid var(--surface-2);
   }
-  .plan-item-dropdown::-webkit-scrollbar-thumb:hover{background:var(--text-faint);}
+  .plan-item-dropdown::-webkit-scrollbar-thumb:hover{background:var(--rule-strong);}
   .plan-item-dropdown.open{display:block;}
   /* แถวในลิสต์ต้องสูงพอให้นิ้วแตะโดนบนมือถือ */
   .plan-item-dropdown .ss-option{padding:10px;min-height:38px;display:flex;align-items:center;}
@@ -566,7 +569,7 @@
   .plan-cell-input.manual{border-color:var(--accent);}
   .plan-owner-input{width:118px;text-align:left;font-family:inherit;font-size:11.5px;}
   select.plan-owner-input{width:132px;cursor:pointer;appearance:none;padding-right:20px;
-    background-image:linear-gradient(45deg,transparent 50%,var(--text-faint) 50%),linear-gradient(135deg,var(--text-faint) 50%,transparent 50%);
+    background-image:linear-gradient(45deg,transparent 50%,var(--rule-strong) 50%),linear-gradient(135deg,var(--rule-strong) 50%,transparent 50%);
     background-position:calc(100% - 12px) 11px, calc(100% - 8px) 11px;background-size:4px 4px;background-repeat:no-repeat;}
   .plan-owner-wrap{display:flex;align-items:center;gap:3px;}
   /* จำนวนงานพร้อมกันของแต่ละคน — ช่องเล็กๆ ในตารางคนในไลน์ */
@@ -746,7 +749,7 @@
     background:var(--surface-2);border:1px solid var(--border);border-radius:999px;
     padding:5px 12px;font-size:12px;color:var(--text-faint);font-family:inherit;
   }
-  .plan-chip:hover{border-color:var(--text-faint);}
+  .plan-chip:hover{border-color:var(--rule-strong);}
   .plan-chip.on{background:var(--accent-dim);border-color:var(--accent);color:var(--text);}
   .plan-chip::before{content:'○';font-size:10px;}
   .plan-chip.on::before{content:'●';color:var(--accent);}
@@ -755,7 +758,7 @@
     background:none;border:1px solid var(--border);border-radius:6px;cursor:pointer;
     color:var(--text-dim);font-family:inherit;font-size:11px;padding:3px 9px;flex-shrink:0;
   }
-  .plan-collapse:hover{border-color:var(--text-faint);color:var(--text);}
+  .plan-collapse:hover{border-color:var(--rule-strong);color:var(--text);}
   .plan-panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;}
   .plan-panel-head h2{margin:0;}
   .plan-job.collapsed .plan-job-body{display:none;}
@@ -792,6 +795,10 @@
      ขวาคือ "ทำเมื่อไร" (แท่งไทม์ไลน์ พร้อมชั่วโมง วัน ช่วงวันที่ และช่องแก้เวลาเริ่มของขั้นตอนนั้น)
      ตัวเลขเวลาย้ายไปอยู่ติดแท่งของตัวเอง ตารางฝั่งซ้ายจึงเหลือเฉพาะช่องที่กรอก/แก้ได้ และพอดีครึ่งจอ */
   #plannerView{max-width:1800px;}
+  /* หน้าวางแผนการผลิต: ตัวอักษรสีเทาทั้งสองระดับ (--text-dim / --text-faint) ให้เป็นสีขาวเหมือนตัวอักษรหลัก
+     ทับที่ตัวแปรจุดเดียว ทุกข้อความในหน้านี้ที่ใช้สองสีนี้จึงเปลี่ยนตามหมด — ไม่แตะสีที่มีความหมาย
+     (ป้ายหน่วยงาน / เขียว-แดง-ส้ม ของสถานะ) ไม่แตะเส้นขอบกับแถบเลื่อน (ใช้ --rule-strong) และไม่แตะหน้าอื่น */
+  #plannerView{--text-dim:var(--text);--text-faint:var(--text);}
   .plan-job-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start;}
   .plan-job-split.one{grid-template-columns:minmax(0,1fr);}
   .plan-job-left,.plan-job-right{min-width:0;}
