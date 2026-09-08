@@ -597,6 +597,8 @@
   .plan-start-edit{display:flex;align-items:center;gap:5px;margin-top:4px;flex-wrap:nowrap;}
   .plan-start-input{width:190px;min-width:190px;text-align:left;padding:5px 6px;flex:none;}
   .plan-material{font-size:11.5px;color:var(--text-dim);line-height:1.5;max-width:260px;}
+  /* แถวที่เป็นชิ้นส่วนเดียวกับแถวเหนือขึ้นไป — บอกแค่ว่าเป็นชิ้นส่วนเดิม ไม่พิมพ์ชื่อยาวซ้ำอีกรอบ */
+  .plan-material.same{color:var(--text-faint);font-style:italic;}
   .plan-tot td{border-top:1px solid var(--border);font-weight:600;color:var(--text);}
   .plan-sep td{
     background:var(--bg-2);color:var(--text-dim);font-size:11.5px;letter-spacing:.02em;
@@ -798,8 +800,11 @@
   .plan-job-left .plan-step-table{min-width:0;}
   .plan-job-left .plan-step-table thead th{white-space:normal;padding:9px 7px;line-height:1.45;}
   .plan-job-left .plan-step-table tbody td{padding:8px 7px;}
-  /* ชื่อวัตถุดิบยาวเกินช่องก็ตัดด้วย … แล้วอ่านเต็มๆ ได้จาก tooltip เหมือนเดิม */
-  .plan-job-left .plan-material{max-width:88px;overflow:hidden;text-overflow:ellipsis;}
+  /* ชื่อวัตถุดิบยาวเกินช่องให้ตกลงบรรทัดที่สองได้ก่อน แล้วค่อยตัดด้วย … (อ่านเต็มๆ ได้จาก tooltip เหมือนเดิม)
+     บรรทัดเดียวสั้นเกินกว่าจะแยกชิ้นส่วนของ Item เดียวกันออกจากกันได้ ทุกแถวเลยดูเหมือนซ้ำกัน */
+  /* ต้องปลด nowrap ที่ตกทอดมาจาก tbody td ก่อน ไม่งั้นข้อความอยู่บรรทัดเดียวแล้วโดนตัดหายไปเฉย ๆ */
+  .plan-job-left .plan-material{max-width:96px;overflow:hidden;overflow-wrap:anywhere;white-space:normal;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
   /* บรรทัดกำกับเล็กๆ ใต้ช่อง (ที่มาของอัตรา / ที่มาของลำดับ) ขึ้นบรรทัดใหม่ได้ ไม่งั้นดันคอลัมน์กว้างเกินครึ่งใบ */
   .plan-job-left .plan-src{white-space:normal;}
   .plan-job-left .plan-cell-input{width:62px;}
@@ -2237,6 +2242,33 @@ function planShortMaterial(text){
   if(!text) return '';
   return text.length > 46 ? text.slice(0,46).trim() + '…' : text;
 }
+
+/** ความยาวของส่วนหัวที่ชื่อ a ไปซ้ำกับชื่อ b — คืน 0 ถ้าไม่คุ้มที่จะตัดทิ้ง
+ *  ตัดที่ขอบคำ (ช่องว่าง) เท่านั้น จะได้ไม่ตัดกลางคำหรือกลางตัวเลขจนอ่านไม่รู้เรื่อง */
+function planSharedHeadLen(a, b){
+  let i = 0;
+  while(i < a.length && i < b.length && a[i] === b[i]) i++;
+  const cut = a.lastIndexOf(' ', i);
+  if(cut < 6) return 0;                       // ส่วนที่ซ้ำสั้นเกินไป ตัดแล้วไม่ได้พื้นที่เพิ่ม
+  return a.slice(cut + 1).trim() ? cut + 1 : 0;   // ต้องยังเหลือข้อความให้อ่าน ไม่งั้นแถวนั้นจะว่างเปล่า
+}
+
+/** ป้ายชื่อวัตถุดิบของแต่ละแถวในตารางขั้นตอน (เรียงตรงกับ materials ที่ส่งเข้ามา)
+ *  ช่องชื่อวัตถุดิบในตารางแคบมาก และชิ้นส่วนของ Item เดียวกันมักขึ้นต้นเหมือนกันยาว ๆ
+ *  (เช่น "ลูกตอปีโด ST-01 ตัว 6.5CM" กับ "ลูกตอปีโด ST-01 หัว 4CM") พอถูกตัดท้ายด้วย …
+ *  ทุกแถวจึงเหลือแต่ส่วนหัวที่เหมือนกันหมด อ่านแล้วเหมือนเป็นแถวซ้ำทั้งที่เป็นคนละชิ้นส่วน
+ *  จึงตัดส่วนหัวที่ไปซ้ำกับชิ้นส่วนอื่นออก ให้เห็นส่วนที่ต่างกันแทน — ตัดทีละชื่อ ไม่ใช่ตัดเท่ากันทั้งตาราง
+ *  เพราะบาง Item มีชิ้นส่วนที่ขึ้นต้นคนละแบบปนอยู่ (ชื่อเต็มยังอ่านได้จาก tooltip ทุกแถว) */
+function planMaterialLabels(materials){
+  const names = (materials || []).map(m=> (m || '').trim());
+  const distinct = [...new Set(names.filter(Boolean))];
+  return names.map(name=>{
+    if(!name) return '';
+    let cut = 0;
+    distinct.forEach(other=>{ if(other !== name) cut = Math.max(cut, planSharedHeadLen(name, other)); });
+    return cut ? '…' + name.slice(cut) : name;
+  });
+}
 /** ปรับข้อความชื่อวัตถุดิบให้เทียบเท่ากันได้ ตัดแค่ช่องว่างซ้ำ/ช่องว่างรอบวงเล็บ-เครื่องหมาย
  *  ไม่แตะตัวเลข/รหัส เพื่อไม่ให้ไซส์หรือรุ่นที่ต่างกันจริงถูกรวมกันผิดๆ (เช่น 95mm กับ 90mm ต้องยังแยกกัน) */
 function planNormalizeMaterialKey(material){
@@ -2456,7 +2488,7 @@ function buildPlanSteps(item, userOrder, manualDepts){
   // ทั้งที่อยากได้เป้าการผลิตเดียวต่อชิ้นส่วน จึงเหลือไว้เฉพาะกลุ่มที่มีข้อมูลอ้างอิง (จำนวนบรรทัด) มากที่สุด
   const byDisplayKey = new Map();
   steps.forEach(s=>{
-    const dispKey = s.dept + '||' + cleanMaterialDisplay(s.material).trim().toLowerCase();
+    const dispKey = planStepKey(s.dept, planNormalizeMaterialKey(cleanMaterialDisplay(s.material)).toLowerCase());
     const prev = byDisplayKey.get(dispKey);
     if(!prev || s.n > prev.n) byDisplayKey.set(dispKey, s);
   });
@@ -3890,11 +3922,12 @@ function renderPlanner(){
 
   // แถวของสายหลักและขั้นตอนแยกเลื่อนลำดับได้ทั้งคู่ — แต่ละกลุ่มเลื่อนสลับได้เฉพาะภายในกลุ่มตัวเอง
   // ฝั่งซ้ายเหลือเฉพาะข้อมูลของงาน (ทำอะไร ใครทำ เท่าไร) ส่วนตัวเลขเวลาอยู่กับแท่งไทม์ไลน์ฝั่งขวา
-  const rowHtml = (r, job, no, lastNo, kind)=>{
+  const rowHtml = (r, job, no, lastNo, kind, matLabels)=>{
     const c = getDeptColor(r.step.dept);
     const dept = escapeHtml(r.step.dept).replace(/"/g,'&quot;');
     const stepKey = escapeHtml(r.step.key).replace(/"/g,'&quot;');
-    const material = cleanMaterialDisplay(r.step.material || '');
+    const material = cleanMaterialDisplay(r.step.material || '').trim();
+    const label = (matLabels && matLabels.get(r)) || {text: material, same: false};
     const srcLabel = r.rate_src ? (PLAN_RATE_SRC_LABEL[r.rate_src] || '') : 'ไม่มีข้อมูล';
     const flowNote = stepFlowNote(r);
     const seq = no
@@ -3905,7 +3938,7 @@ function renderPlanner(){
     return `<tr>
       <td><div class="plan-seq">${seq}</div></td>
       <td><span class="prod-dept-pill" style="background:${c.bg};color:${c.text};border-color:${c.border};">${escapeHtml((r.step.dept))}</span>${STEP_OPTIONAL[r.step.dept] ? '<div class="plan-src">เฉพาะบอลบางไซส์</div>' : ''}${r.step.rank_src === 'manual' ? `<button class="plan-move plan-del plan-del-step" data-delstep="${dept}" data-job="${job.uid}" title="ลบขั้นตอนที่เพิ่มเอง">✕</button>` : ''}<div class="plan-src plan-rank ${r.step.rank_src === 'standard' ? '' : 'guess'}" title="${escapeHtml((PLAN_RANK_LABEL[r.step.rank_src] || '').replace('· ',''))}${r.step.n ? ' · อ้างอิงจากข้อมูลย้อนหลัง ' + fmtNum(r.step.n) + ' รายการ' : ' · ไม่มีข้อมูลย้อนหลัง กรอกอัตราเอง'}">${PLAN_RANK_SHORT[r.step.rank_src] || ''}${r.step.n ? ' · ' + fmtNum(r.step.n) + ' รก.' : ''}</div></td>
-      <td><div class="plan-material" title="${escapeHtml(material).replace(/"/g,'&quot;')}">${material ? escapeHtml(planShortMaterial(material)) : '—'}</div></td>
+      <td><div class="plan-material${label.same ? ' same' : ''}" title="${escapeHtml(material).replace(/"/g,'&quot;')}">${material ? (label.same ? 'ชิ้นส่วนเดิม' : escapeHtml(planShortMaterial(label.text))) : '—'}</div></td>
       <td>
         ${ownerPicker(r, job, stepKey)}
         ${!r.owner && plan.overlap && r.assigned && r.assigned.length ? `<div class="plan-src">จัดให้: ${escapeHtml(r.assigned.join(', '))}</div>` : ''}
@@ -3976,9 +4009,22 @@ function renderPlanner(){
 
   const jobHtml = (jp, i)=>{
     const job = jp.job;
-    const mainBody = jp.main.map((r,k)=> rowHtml(r, job, k+1, jp.main.length, 'main')).join('');
+    // ดูชื่อวัตถุดิบของทุกขั้นตอนใน Item นี้พร้อมกัน แล้วตัดส่วนหัวที่ไปซ้ำกับชิ้นส่วนอื่นออกทีละชื่อ
+    const allRows = [...jp.main, ...jp.extra];
+    const labels = planMaterialLabels(allRows.map(r=> cleanMaterialDisplay(r.step.material || '')));
+    const matLabels = new Map();
+    allRows.forEach((r,k)=> matLabels.set(r, {text: labels[k], same: false}));
+    // หลายขั้นตอนของชิ้นส่วนเดียวกันเรียงติดกันอยู่แล้ว ไม่ต้องพิมพ์ชื่อเดิมซ้ำทุกแถว
+    // (เทียบกับแถวที่อยู่เหนือขึ้นไปหนึ่งแถวเท่านั้น ผู้ใช้สลับลำดับแถวเองแล้วป้ายก็ยังถูก)
+    [jp.main, jp.extra].forEach(list=>{
+      list.forEach((r, k)=>{
+        const prev = k > 0 ? list[k-1] : null;
+        if(prev && r.step.material && prev.step.material === r.step.material) matLabels.get(r).same = true;
+      });
+    });
+    const mainBody = jp.main.map((r,k)=> rowHtml(r, job, k+1, jp.main.length, 'main', matLabels)).join('');
     const extraBody = jp.extra.length
-      ? `<tr class="plan-sep"><td colspan="9">ขั้นตอนแยก — ไม่ได้อยู่ในลำดับสายหลัก จึงไม่ผูกวันที่และไม่นับรวมในวันที่เสร็จ (เลื่อนขึ้น/ลงได้เพื่อจัดลำดับที่แสดง)</td></tr>` + jp.extra.map((r,k)=> rowHtml(r, job, k+1, jp.extra.length, 'extra')).join('')
+      ? `<tr class="plan-sep"><td colspan="9">ขั้นตอนแยก — ไม่ได้อยู่ในลำดับสายหลัก จึงไม่ผูกวันที่และไม่นับรวมในวันที่เสร็จ (เลื่อนขึ้น/ลงได้เพื่อจัดลำดับที่แสดง)</td></tr>` + jp.extra.map((r,k)=> rowHtml(r, job, k+1, jp.extra.length, 'extra', matLabels)).join('')
       : '';
     // ไทม์ไลน์ของใบนี้เป็นเนื้อหาฝั่งขวาทั้งฝั่ง — ถ้าไม่มี (ปิดไว้ / ยังไม่มีวันที่) ก็แสดงตารางเต็มความกว้างแทน
     const tlHtml = jobTimelineHtml(jp);
